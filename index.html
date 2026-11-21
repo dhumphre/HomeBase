@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home Base</title>
+<meta name="description" content="A private logbook for the house, the cars and the projects: what was done, what is due, and where everything lives.">
+<meta name="theme-color" content="#f3f5f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121715" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+</head>
+<body>
+<div id="app" class="app" data-state="booting">
+
+  <!-- Signed-out landing -->
+  <section id="landing" class="landing" hidden>
+    <div class="landing-card">
+      <div class="wordmark"><span class="mark"></span>Home Base</div>
+      <h1>The house, the cars, the projects. One logbook.</h1>
+      <p>What was done, what is due, and where every part number lives. Private to your account.</p>
+      <button id="landing-signin" class="btn primary" type="button">Sign in with Google</button>
+      <p id="landing-msg" class="msg" hidden></p>
+    </div>
+  </section>
+
+  <!-- Signed-in shell -->
+  <div id="shell" class="shell" hidden>
+    <aside class="sidebar">
+      <a class="wordmark" href="#/"><span class="mark"></span>Home Base</a>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot">
+        <button id="new-btn" class="btn primary small" type="button">+ New</button>
+        <div class="who"><span id="who"></span><button id="signout" class="link" type="button">sign out</button></div>
+      </div>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+
+  <!-- Generic editor dialog -->
+  <dialog id="editor" class="editor">
+    <form id="editor-form" method="dialog">
+      <header><h2 id="editor-title">Edit</h2><button class="icon" type="button" data-close aria-label="Close">×</button></header>
+      <div id="editor-fields" class="fields"></div>
+      <footer>
+        <button id="editor-delete" class="btn danger" type="button" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" data-close>Cancel</button>
+        <button class="btn primary" type="submit">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- New-item picker -->
+  <dialog id="picker" class="picker">
+    <h2>What are you adding?</h2>
+    <div class="picker-grid" id="picker-grid"></div>
+    <button class="btn" type="button" data-close>Cancel</button>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
