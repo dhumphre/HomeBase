@@ -1,0 +1,10 @@
+{
+  "name": "Spare light bulbs",
+  "area": "House",
+  "type": "Supplies",
+  "make": null,
+  "specs": "Mostly A19 / E26 base. Stock on the garage shelf; counts are pack sizes, adjust as used.",
+  "notes": "## On the shelf (Nov 2026)\n\n| Bulb | Type | Watts (equiv.) | Lumens | Color | Base / shape | Pack |\n| --- | --- | --- | --- | --- | --- | --- |\n| GE Energy Smart ceiling fan | CFL, non-dimmable | 11 W (40 W) | 500 | Soft white | A17 decorative, E26 | 2 |\n| GE Energy Smart Instant On | CFL | 13 W (60 W) | 825 | Soft white | Spiral, E26 | 1 |\n| Energetic Lighting | LED, dimmable, 90 CRI | 9.8 W (60 W) | 800 | Daylight 5000K | A19, E26 | 6 |\n| Great Eagle warm white 60 | LED | 9 W (60 W) | 750 | Warm 2700K | A19, E26 | 4 |\n| IKEA SPARSAM | CFL | 11 W | 550 | Warm 2700K | Globe, E26 | 1 |\n| Philips WiZ Connected | Smart Wi-Fi LED, full color | 8.8 W (60 W) | 800 | Tunable | A19, E26 | 2 |\n| GE Precise | Halogen, long life, UV control | ? | ? | — | MR16 | 1 |\n\nUpdate the pack column when you use one. Add a log entry when a fixture gets a new bulb so the history says which type went where.",
+  "contact": null,
+  "manual": null
+}

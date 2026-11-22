@@ -1,0 +1,7 @@
+{
+  "name": "homebase-tools",
+  "private": true,
+  "type": "module",
+  "description": "Command-line access to the Home Base Firestore data for Claude Code (needs a service-account key kept outside the repo).",
+  "dependencies": { "firebase-admin": "^13.4.0" }
+}
