@@ -130,6 +130,7 @@ async function remove(coll, id) {
 
 function subscribeAll() {
   unsubscribeAll();
+  unsubs.push(onSnapshot(doc(db, 'users', state.user.uid, 'map', 'layout'), snap => { store.map = snap.exists() ? snap.data() : null; render(); }, () => {}));
   let pending = COLLS.length;
   for (const c of COLLS) {
     const u = onSnapshot(collection(db, 'users', state.user.uid, c), snap => {
@@ -158,6 +159,7 @@ async function signIn() {
 onAuthStateChanged(auth, user => {
   state.user = user; state.ready = false;
   for (const c of COLLS) store[c] = {};
+  store.map = null;
   if (user) { $('#who').textContent = user.displayName || user.email || ''; subscribeAll(); }
   else unsubscribeAll();
   render();
@@ -184,7 +186,7 @@ window.addEventListener('hashchange', () => { state.route = parseHash(); render(
 state.route = parseHash();
 
 const NAV = [
-  ['home', 'Home', '⌂'], ['log', 'Log', 'L'], ['schedule', 'Schedule', 'S'], ['todos', 'To-dos', 'T'],
+  ['home', 'Home', '⌂'], ['map', 'Map', 'M'], ['log', 'Log', 'L'], ['schedule', 'Schedule', 'S'], ['todos', 'To-dos', 'T'],
   ['assets', 'Assets', 'A'], ['projects', 'Projects', 'P'], ['pages', 'Pages', 'W'], ['settings', 'Settings', '⚙']
 ];
 
@@ -192,12 +194,14 @@ const NAV = [
 function render() {
   const appEl = $('#app');
   if (!state.user) { appEl.dataset.state = 'out'; $('#landing').hidden = false; $('#shell').hidden = true; return; }
+  if (mapState.drag) { mapState.pendingRender = true; return; } // never re-render mid-drag
   appEl.dataset.state = 'in'; $('#landing').hidden = true; $('#shell').hidden = false;
   renderNav();
   const { view, id } = state.route;
-  const views = { home, log, schedule, todos, assets, projects, pages, settings };
+  const views = { home, map, log, schedule, todos, assets, projects, pages, settings };
   const fn = views[view] || home;
   $('#main').innerHTML = fn(id);
+  if (view === 'map') bindMap();
   document.title = `${view === 'home' ? 'Home Base' : (SCHEMA[view] ? SCHEMA[view].many : view[0].toUpperCase() + view.slice(1)) + ' · Home Base'}`;
 }
 
@@ -333,7 +337,8 @@ function assetDetail(id) {
   const sched = list('schedule').filter(s => s.asset === id).sort((x, y) => (x.nextDue || '9999') > (y.nextDue || '9999') ? 1 : -1);
   const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-  const props = [['Area', chip(a.area)], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">open ↗</a>` : ''], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
+  const room = a.map ? roomAt(a.map) : null;
+  const props = [['Area', chip(a.area)], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">open ↗</a>` : ''], ['On map', a.map ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
   return `
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
@@ -442,6 +447,232 @@ function settings() {
       <section class="card"><header><h2>Account</h2></header><div style="padding:14px 16px;font-size:14px;color:var(--ink-2)">Signed in as ${esc(state.user.email || state.user.displayName || '')}. Data is stored in Firebase under your user id and readable only by you.</div></section>
     </div>`;
 }
+
+// ---------------------------------------------------------------- map
+// Rooms live in one document (map/layout); each asset carries its own map position {floor, x, y}.
+const MAP_W = 1000, MAP_H = 640, SNAP = 10;
+const mapState = { floor: null, mode: 'view', selected: null, placing: null, drag: null, pendingRender: false, hover: null };
+function mapData() {
+  const m = store.map || {};
+  return { floors: m.floors && m.floors.length ? m.floors : [{ id: 'main', name: 'Main floor' }], rooms: m.rooms || [], bg: m.bg || {} };
+}
+function floorName(id) { const f = mapData().floors.find(f => f.id === id); return f ? f.name : ''; }
+function roomAt(pos) { return mapData().rooms.find(r => r.floor === pos.floor && pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) || null; }
+async function saveMap(patch) {
+  const m = { ...mapData(), ...patch, id: 'layout', updated: Date.now() };
+  store.map = m; render();
+  try { await setDoc(doc(db, 'users', state.user.uid, 'map', 'layout'), m); }
+  catch (e) { toast(`Couldn't save the map (${e.code || e.message}).`, true); }
+}
+function assetStatus(id) {
+  const items = list('schedule').filter(s => s.asset === id && s.nextDue).sort(by('nextDue'));
+  const worst = items.length ? daysUntil(items[0].nextDue) : null;
+  const todos = list('todos').filter(t => t.asset === id && t.status !== 'done');
+  const last = list('log').filter(l => l.asset === id).sort(by('date', -1))[0] || null;
+  const cls = worst == null ? (todos.length ? 'todo' : 'none') : worst < 0 ? 'over' : worst <= 30 ? 'soon' : 'ok';
+  const label = cls === 'over' ? `${-worst}d overdue` : cls === 'soon' ? (worst === 0 ? 'due today' : `due in ${worst}d`) : cls === 'ok' ? 'all good' : cls === 'todo' ? `${todos.length} open to-do${todos.length > 1 ? 's' : ''}` : 'nothing scheduled';
+  return { cls, worst, todos, items, last, label };
+}
+const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
+function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
+
+function map() {
+  const m = mapData();
+  if (!mapState.floor || !m.floors.some(f => f.id === mapState.floor)) mapState.floor = m.floors[0].id;
+  const floor = m.floors.find(f => f.id === mapState.floor);
+  const rooms = m.rooms.filter(r => r.floor === floor.id);
+  const placed = list('assets').filter(a => a.map && a.map.floor === floor.id);
+  const unplaced = list('assets').filter(a => !a.map).sort(by('name'));
+  const edit = mapState.mode === 'edit';
+  const sel = edit && mapState.selected ? m.rooms.find(r => r.id === mapState.selected) : null;
+  const placingAsset = mapState.placing ? store.assets[mapState.placing] : null;
+
+  const roomsSvg = rooms.map((r, i) => `<g class="room t${r.color ?? i % 6} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
+      <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8"/>
+      <rect class="sheen" x="${r.x + 3}" y="${r.y + 3}" width="${Math.max(0, r.w - 6)}" height="${Math.max(0, r.h - 6)}" rx="6"/>
+      <rect class="wall" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8"/>
+      <text class="room-label" x="${r.x + 12}" y="${r.y + 22}">${esc(r.name)}</text>
+      ${edit ? `<rect class="handle" data-handle="${r.id}" x="${r.x + r.w - 14}" y="${r.y + r.h - 14}" width="14" height="14" rx="3"/>` : ''}
+    </g>`).join('');
+  const markersSvg = placed.map(a => { const st = assetStatus(a.id); return `<g class="marker ${st.cls}" data-asset="${a.id}" transform="translate(${a.map.x},${a.map.y})">
+      <circle class="halo" r="26"/><circle class="disc" r="18"/>
+      <text class="glyph" y="6" text-anchor="middle">${assetIcon(a)}</text>
+      <text class="mlabel" y="36" text-anchor="middle">${esc(a.name)}</text>
+    </g>`; }).join('');
+  const bg = m.bg[floor.id] ? `<image href="${m.bg[floor.id]}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : '';
+
+  const floorTabs = `<div class="seg">${m.floors.map(f => `<button type="button" aria-pressed="${f.id === floor.id}" data-action="map-floor" data-id="${f.id}">${esc(f.name)}</button>`).join('')}</div>`;
+  const statusRows = placed.map(a => ({ a, st: assetStatus(a.id) })).sort((x, y) => ['over', 'soon', 'todo', 'ok', 'none'].indexOf(x.st.cls) - ['over', 'soon', 'todo', 'ok', 'none'].indexOf(y.st.cls));
+
+  const panel = edit ? `
+      <section class="card"><header><h2>Editing ${esc(floor.name)}</h2></header>
+        <div class="map-panel">
+          <p class="hint">Drag on empty space to draw a room. Drag a room to move it, its corner to resize. Drag components to move them.</p>
+          <label class="field"><span>Floor name</span><input type="text" value="${esc(floor.name)}" data-map="floor-name"></label>
+          <div class="row">${btn('+ Floor', 'map-add-floor')}${m.floors.length > 1 && !rooms.length && !placed.length ? btn('Delete floor', 'map-del-floor', '', 'btn small danger') : ''}</div>
+          <label class="field"><span>Floor plan image (optional)</span><span class="row">${m.bg[floor.id] ? btn('Remove image', 'map-bg-remove', '', 'btn small') : ''}<label class="btn small">Upload<input type="file" accept="image/*" data-action="map-bg" hidden></label></span></label>
+        </div>
+      </section>
+      ${sel ? `<section class="card"><header><h2>Room</h2></header><div class="map-panel">
+          <label class="field"><span>Name</span><input type="text" id="room-name" value="${esc(sel.name)}" data-map="room-name"></label>
+          <div class="swatches">${[0, 1, 2, 3, 4, 5].map(i => `<button type="button" class="swatch t${i} ${(sel.color ?? 0) === i ? 'on' : ''}" data-action="map-room-color" data-value="${i}" aria-label="Color ${i + 1}"></button>`).join('')}</div>
+          <div class="row">${btn('Delete room', 'map-del-room', '', 'btn small danger')}</div></div></section>` : ''}
+      <section class="card"><header><h2>Place components</h2><span class="more">${unplaced.length}</span></header>
+        ${placingAsset ? `<div class="callout small"><p>Click on the map to place <b>${esc(placingAsset.name)}</b>.</p>${btn('Cancel', 'map-place-cancel')}</div>` : ''}
+        ${unplaced.length ? `<ul class="rows">${unplaced.map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(a.area || '')}</span></span>${btn('Place', 'map-place', `data-id="${a.id}"`)}</li>`).join('')}</ul>` : `<div class="empty">Every asset is on the map. Add more under Assets.</div>`}
+      </section>
+      ${placed.length ? `<section class="card"><header><h2>On this floor</h2></header><ul class="rows">${placed.sort(by('name')).map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}</span>${btn('Unplace', 'map-unplace', `data-id="${a.id}"`, 'btn small ghost')}</li>`).join('')}</ul></section>` : ''}`
+    : `
+      <section class="card"><header><h2>Status</h2></header>
+        <ul class="legend"><li><i class="over"></i>Overdue</li><li><i class="soon"></i>Due within 30 days</li><li><i class="todo"></i>Open to-do</li><li><i class="ok"></i>All good</li><li><i class="none"></i>Nothing scheduled</li></ul>
+      </section>
+      <section class="card"><header><h2>On ${esc(floor.name)}</h2><span class="more">${placed.length}</span></header>
+        ${statusRows.length ? `<ul class="rows">${statusRows.map(({ a, st }) => `<li data-hl="${a.id}"><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>`).join('')}</ul>` : `<div class="empty">Nothing placed on this floor yet. Switch to Edit to draw rooms and place components.</div>`}
+      </section>`;
+
+  return `
+    ${head('Map', { eyebrow: `${m.rooms.length} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
+    ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p>${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn primary small')}</div>` : ''}
+    <div class="map-layout">
+      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset ? 'placing' : ''}">
+        <svg id="map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map">
+          <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
+          <rect width="${MAP_W}" height="${MAP_H}" class="ground"/>${bg}<rect width="${MAP_W}" height="${MAP_H}" fill="url(#grid)" class="gridfill"/>
+          <g id="rooms">${roomsSvg}</g><g id="markers">${markersSvg}</g><g id="scratch"></g>
+        </svg>
+        <div class="map-tip" id="map-tip" hidden></div>
+      </div>
+      <aside class="map-side">${panel}</aside>
+    </div>`;
+}
+
+function tipHtml(id) {
+  const a = store.assets[id]; if (!a) return '';
+  const st = assetStatus(id);
+  const next = st.items.slice(0, 3).map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m ', '')}">${lbl}</span></li>`; }).join('');
+  return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
+    <div class="tip-status ${st.cls}">${esc(st.label)}</div>
+    ${next ? `<ul class="tip-list">${next}</ul>` : ''}
+    ${st.todos.length ? `<div class="tip-line">${st.todos.length} open to-do${st.todos.length > 1 ? 's' : ''}: ${esc(st.todos.slice(0, 2).map(t => t.name).join(', '))}</div>` : ''}
+    ${st.last ? `<div class="tip-line">Last: ${esc(st.last.item)} · ${fmtDate(st.last.date)}</div>` : '<div class="tip-line">No work logged yet</div>'}
+    ${a.specs ? `<div class="tip-line mono">${esc(a.specs)}</div>` : ''}
+    <div class="tip-foot">Click to open</div>`;
+}
+
+function bindMap() {
+  const svg = $('#map-svg'); if (!svg) return;
+  const wrap = svg.parentElement; const tip = $('#map-tip');
+  const pt = e => { const r = svg.getBoundingClientRect(); return { x: (e.clientX - r.left) * MAP_W / r.width, y: (e.clientY - r.top) * MAP_H / r.height }; };
+  const snap = v => Math.round(v / SNAP) * SNAP;
+  const clamp = (v, max) => Math.max(0, Math.min(max, v));
+  const room = id => mapData().rooms.find(r => r.id === id);
+
+  function showTip(id, e) {
+    if (!id || mapState.mode === 'edit') { tip.hidden = true; return; }
+    if (tip.dataset.id !== id) { tip.innerHTML = tipHtml(id); tip.dataset.id = id; }
+    tip.hidden = false;
+    const r = wrap.getBoundingClientRect(); let x = e.clientX - r.left + 16, y = e.clientY - r.top + 16;
+    if (x + tip.offsetWidth > r.width - 8) x = e.clientX - r.left - tip.offsetWidth - 16;
+    if (y + tip.offsetHeight > r.height - 8) y = Math.max(8, r.height - tip.offsetHeight - 8);
+    tip.style.left = `${x}px`; tip.style.top = `${y}px`;
+  }
+
+  svg.addEventListener('pointermove', e => {
+    const p = pt(e); const d = mapState.drag;
+    if (d) {
+      const dx = snap(p.x - d.start.x), dy = snap(p.y - d.start.y);
+      if (d.type === 'room') d.el.setAttribute('transform', `translate(${dx},${dy})`);
+      else if (d.type === 'asset') d.el.setAttribute('transform', `translate(${clamp(snap(d.orig.x + dx), MAP_W)},${clamp(snap(d.orig.y + dy), MAP_H)})`);
+      else if (d.type === 'resize') { const w = Math.max(40, d.orig.w + dx), h = Math.max(40, d.orig.h + dy); d.el.querySelectorAll('rect.floor, rect.wall').forEach(r => { r.setAttribute('width', w); r.setAttribute('height', h); }); const sh = d.el.querySelector('rect.sheen'); sh.setAttribute('width', Math.max(0, w - 6)); sh.setAttribute('height', Math.max(0, h - 6)); const hd = d.el.querySelector('.handle'); hd.setAttribute('x', d.orig.x + w - 14); hd.setAttribute('y', d.orig.y + h - 14); }
+      else if (d.type === 'draw') { const x = Math.min(d.start.x, p.x), y = Math.min(d.start.y, p.y); d.rect.setAttribute('x', snap(x)); d.rect.setAttribute('y', snap(y)); d.rect.setAttribute('width', Math.abs(snap(p.x) - snap(d.start.x))); d.rect.setAttribute('height', Math.abs(snap(p.y) - snap(d.start.y))); }
+      return;
+    }
+    const g = e.target.closest('[data-asset]');
+    showTip(g ? g.dataset.asset : null, e);
+  });
+  svg.addEventListener('pointerleave', () => { if (!mapState.drag) tip.hidden = true; });
+
+  svg.addEventListener('pointerdown', e => {
+    if (mapState.mode !== 'edit' || e.button !== 0) return;
+    const p = pt(e);
+    if (mapState.placing) {
+      const a = store.assets[mapState.placing]; mapState.placing = null;
+      if (a) save('assets', { ...a, map: { floor: mapState.floor, x: clamp(snap(p.x), MAP_W), y: clamp(snap(p.y), MAP_H) } });
+      toast(`${a ? a.name : 'Component'} placed`); return;
+    }
+    const handle = e.target.closest('[data-handle]'), marker = e.target.closest('[data-asset]'), rm = e.target.closest('[data-room]');
+    e.preventDefault(); svg.setPointerCapture(e.pointerId);
+    if (handle) mapState.drag = { type: 'resize', id: handle.dataset.handle, start: p, orig: { ...room(handle.dataset.handle) }, el: handle.closest('g') };
+    else if (marker) mapState.drag = { type: 'asset', id: marker.dataset.asset, start: p, orig: { ...store.assets[marker.dataset.asset].map }, el: marker };
+    else if (rm) { mapState.selected = rm.dataset.room; mapState.drag = { type: 'room', id: rm.dataset.room, start: p, orig: { ...room(rm.dataset.room) }, el: rm }; }
+    else { const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); rect.setAttribute('class', 'drawing'); rect.setAttribute('rx', '8'); $('#scratch').append(rect); mapState.selected = null; mapState.drag = { type: 'draw', start: p, rect }; }
+  });
+
+  svg.addEventListener('pointerup', async e => {
+    const d = mapState.drag; if (!d) return;
+    mapState.drag = null;
+    const p = pt(e); const dx = snap(p.x - d.start.x), dy = snap(p.y - d.start.y);
+    const m = mapData();
+    if (d.type === 'room') { if (dx || dy) { const rooms = m.rooms.map(r => r.id === d.id ? { ...r, x: clamp(r.x + dx, MAP_W - r.w), y: clamp(r.y + dy, MAP_H - r.h) } : r); await saveMap({ rooms }); } else render(); }
+    else if (d.type === 'resize') { const rooms = m.rooms.map(r => r.id === d.id ? { ...r, w: Math.max(40, d.orig.w + dx), h: Math.max(40, d.orig.h + dy) } : r); await saveMap({ rooms }); }
+    else if (d.type === 'asset') { const a = store.assets[d.id]; const pos = { floor: mapState.floor, x: clamp(snap(d.orig.x + dx), MAP_W), y: clamp(snap(d.orig.y + dy), MAP_H) }; if (pos.x !== a.map.x || pos.y !== a.map.y) await save('assets', { ...a, map: pos }); else render(); }
+    else if (d.type === 'draw') {
+      d.rect.remove();
+      const x = snap(Math.min(d.start.x, p.x)), y = snap(Math.min(d.start.y, p.y)), w = Math.abs(snap(p.x) - snap(d.start.x)), h = Math.abs(snap(p.y) - snap(d.start.y));
+      if (w >= 40 && h >= 40) { const r = { id: uid(), floor: mapState.floor, name: 'New room', x, y, w, h, color: m.rooms.length % 6 }; mapState.selected = r.id; saveMap({ rooms: [...m.rooms, r] }); const inp = $('#room-name'); if (inp) { inp.focus(); inp.select(); } }
+      else render();
+    }
+    if (mapState.pendingRender) { mapState.pendingRender = false; render(); }
+  });
+
+  svg.addEventListener('click', e => {
+    if (mapState.mode !== 'view') return;
+    const g = e.target.closest('[data-asset]'); if (g) location.hash = `#/assets/${g.dataset.asset}`;
+  });
+  // hovering a row in the side list lights its marker
+  wrap.parentElement.addEventListener('pointerover', e => { const li = e.target.closest('[data-hl]'); svg.querySelectorAll('.marker.lit').forEach(m => m.classList.remove('lit')); if (li) { const mk = svg.querySelector(`[data-asset="${li.dataset.hl}"]`); if (mk) mk.classList.add('lit'); } });
+}
+
+async function mapBackground(file) {
+  const img = new Image(); const url = URL.createObjectURL(file);
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+  const scale = Math.min(1, 1600 / img.width, 1100 / img.height);
+  const c = document.createElement('canvas'); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+  let q = 0.82, data = c.toDataURL('image/jpeg', q);
+  while (data.length > 850000 && q > 0.4) { q -= 0.1; data = c.toDataURL('image/jpeg', q); }
+  if (data.length > 850000) { toast('That image is too large even after shrinking. Try a cropped version.', true); return; }
+  await saveMap({ bg: { ...mapData().bg, [mapState.floor]: data } });
+  toast('Floor plan added');
+}
+
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-action^="map-"]'); if (!el) return;
+  const a = el.dataset.action; const m = mapData();
+  if (a === 'map-mode') { mapState.mode = el.dataset.value; mapState.selected = null; mapState.placing = null; render(); }
+  else if (a === 'map-floor') { mapState.floor = el.dataset.id; mapState.selected = null; render(); }
+  else if (a === 'map-goto') { mapState.floor = el.dataset.floor; mapState.mode = 'view'; }
+  else if (a === 'map-add-floor') { const f = { id: uid(), name: `Floor ${m.floors.length + 1}` }; mapState.floor = f.id; saveMap({ floors: [...m.floors, f] }); const inp = $('[data-map="floor-name"]'); if (inp) { inp.focus(); inp.select(); } }
+  else if (a === 'map-del-floor') { if (m.floors.length > 1 && confirm(`Delete ${floorName(mapState.floor)}?`)) { const bg = { ...m.bg }; delete bg[mapState.floor]; const floors = m.floors.filter(f => f.id !== mapState.floor); mapState.floor = floors[0].id; await saveMap({ floors, bg }); } }
+  else if (a === 'map-del-room') { if (confirm('Delete this room? Components stay where they are.')) { const id = mapState.selected; mapState.selected = null; await saveMap({ rooms: m.rooms.filter(r => r.id !== id) }); } }
+  else if (a === 'map-room-color') { await saveMap({ rooms: m.rooms.map(r => r.id === mapState.selected ? { ...r, color: Number(el.dataset.value) } : r) }); }
+  else if (a === 'map-place') { mapState.placing = el.dataset.id; mapState.mode = 'edit'; if (state.route.view !== 'map') location.hash = '#/map'; else render(); }
+  else if (a === 'map-place-cancel') { mapState.placing = null; render(); }
+  else if (a === 'map-unplace') { const as = store.assets[el.dataset.id]; if (as) { const copy = { ...as }; delete copy.map; store.assets[as.id] = copy; await save('assets', { ...copy, map: null }); } }
+  else if (a === 'map-bg-remove') { const bg = { ...m.bg }; delete bg[mapState.floor]; await saveMap({ bg }); }
+});
+document.addEventListener('change', async e => {
+  const t = e.target;
+  if (t.dataset.action === 'map-bg' && t.files[0]) { mapBackground(t.files[0]).catch(() => toast("Couldn't read that image.", true)); return; }
+  if (t.dataset.map === 'floor-name') { const v = t.value.trim(); if (v) await saveMap({ floors: mapData().floors.map(f => f.id === mapState.floor ? { ...f, name: v } : f) }); }
+  if (t.dataset.map === 'room-name') { const v = t.value.trim(); if (v) await saveMap({ rooms: mapData().rooms.map(r => r.id === mapState.selected ? { ...r, name: v } : r) }); }
+});
+document.addEventListener('keydown', e => {
+  if (state.route.view === 'map' && mapState.mode === 'edit' && (e.key === 'Delete' || e.key === 'Backspace') && mapState.selected && !/input|textarea/i.test(e.target.tagName)) {
+    e.preventDefault(); const id = mapState.selected; mapState.selected = null; saveMap({ rooms: mapData().rooms.filter(r => r.id !== id) });
+  }
+  if (e.key === 'Escape' && mapState.placing) { mapState.placing = null; render(); }
+});
 
 // ---------------------------------------------------------------- editor dialog
 function openEditor(coll, data = {}, presets = {}) {
