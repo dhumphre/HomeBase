@@ -307,7 +307,8 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 /* isometric */
 .map-wrap.iso { background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--surface) 70%, var(--accent-soft)), var(--surface) 70%); }
 .map-wrap.iso .room .floor { stroke: none; }
-.map-wrap.iso .room .wall-t, .map-wrap.iso .room .wall-l { stroke: var(--wall); stroke-width: 1.5; stroke-linejoin: round; }
+.map-wrap.iso .room .wall-t, .map-wrap.iso .room .wall-l { stroke: none; }
+.map-wrap.iso .room .post { stroke: var(--wall); stroke-width: 1.5; stroke-linecap: round; }
 .map-wrap.iso .room .wall-t { fill: color-mix(in srgb, var(--room-0) 72%, #fff); }
 .map-wrap.iso .room .wall-l { fill: color-mix(in srgb, var(--room-0) 70%, #000); }
 .map-wrap.iso .room.t1 .wall-t { fill: color-mix(in srgb, var(--room-1) 72%, #fff); } .map-wrap.iso .room.t1 .wall-l { fill: color-mix(in srgb, var(--room-1) 70%, #000); }
@@ -316,7 +317,7 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .map-wrap.iso .room.t4 .wall-t { fill: color-mix(in srgb, var(--room-4) 72%, #fff); } .map-wrap.iso .room.t4 .wall-l { fill: color-mix(in srgb, var(--room-4) 70%, #000); }
 .map-wrap.iso .room.t5 .wall-t { fill: color-mix(in srgb, var(--room-5) 72%, #fff); } .map-wrap.iso .room.t5 .wall-l { fill: color-mix(in srgb, var(--room-5) 70%, #000); }
 .map-wrap.iso .room .wall-top { fill: none; stroke: var(--wall); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
-.map-wrap.iso .room .base { fill: none; stroke: rgba(0,0,0,.18); stroke-width: 2; }
+.map-wrap.iso .room .base { fill: none; stroke: rgba(0,0,0,.18); stroke-width: 2; stroke-linecap: round; }
 .map-wrap.iso .room-label { font-size: 14px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 .marker.iso .shadow { fill: rgba(0,0,0,.22); }
 .marker.iso .tile { fill: var(--surface); stroke: var(--ink-3); stroke-width: 2.5; stroke-linejoin: round; }

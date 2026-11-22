@@ -477,6 +477,40 @@ function assetStatus(id) {
 const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
 function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
 
+// Rooms with the same name on a floor join into one shape: shared color, no wall along their seams, one label.
+const roomKey = r => (r.name || '').trim().toLowerCase();
+function roomGroups(rooms) { const g = new Map(); for (const r of rooms) { const k = roomKey(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); } return g; }
+function groupStyle(group) { const main = [...group].sort((a, b) => b.w * b.h - a.w * a.h)[0]; return { main, color: main.color ?? 0 }; }
+// The exterior edges of one rectangle: each side is cut where sibling rectangles start or end, and pieces that face into a sibling are dropped.
+function roomEdges(r, group) {
+  const others = group.filter(o => o.id !== r.id);
+  const inside = (x, y) => others.some(o => x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h);
+  const sides = [['top', r.x, r.y, r.x + r.w, r.y, 0, -1], ['right', r.x + r.w, r.y, r.x + r.w, r.y + r.h, 1, 0], ['bottom', r.x, r.y + r.h, r.x + r.w, r.y + r.h, 0, 1], ['left', r.x, r.y, r.x, r.y + r.h, -1, 0]];
+  const edges = [];
+  for (const [side, x0, y0, x1, y1, nx, ny] of sides) {
+    const horiz = y0 === y1, lo = horiz ? x0 : y0, hi = horiz ? x1 : y1;
+    const cuts = [...new Set([lo, hi, ...others.flatMap(o => horiz ? [o.x, o.x + o.w] : [o.y, o.y + o.h]).filter(v => v > lo && v < hi)])].sort((a, b) => a - b);
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const a = cuts[i], b = cuts[i + 1], mid = (a + b) / 2;
+      if (inside((horiz ? mid : x0) + nx * 0.5, (horiz ? y0 : mid) + ny * 0.5)) continue;
+      edges.push(horiz ? { side, x0: a, y0, x1: b, y1: y0 } : { side, x0, y0: a, x1: x0, y1: b });
+    }
+  }
+  return edges;
+}
+
+// Traced from the robot-vacuum map of the house (Nov 2026), plus the garage off the living room by the front door. Same-named pieces join.
+const HOUSE_LAYOUT = [
+  ['Study', 50, 30, 170, 100, 2], ['Guest Bath', 220, 40, 70, 90, 0], ['Hallway', 190, 130, 100, 40, 4], ['Hallway', 190, 170, 50, 130, 4],
+  ['Guest Bedroom', 50, 130, 140, 170, 3], ['Primary Bedroom', 290, 100, 170, 150, 0], ['Guest Bedroom 2', 460, 60, 110, 110, 3], ['Primary Bath', 330, 250, 140, 90, 1],
+  ['Living Room', 170, 300, 160, 220, 5], ['Living Room', 330, 340, 370, 260, 5], ['Garage', 700, 340, 240, 260, 1]];
+async function loadHouseLayout() {
+  const m = mapData(); const here = m.rooms.filter(r => r.floor === mapState.floor);
+  if (here.length && !confirm(`Replace the ${here.length} room${here.length > 1 ? 's' : ''} on ${floorName(mapState.floor)} with the traced house layout? Components keep their positions.`)) return;
+  const rooms = [...m.rooms.filter(r => r.floor !== mapState.floor), ...HOUSE_LAYOUT.map(([name, x, y, w, h, color]) => ({ id: uid(), floor: mapState.floor, name, x, y, w, h, color }))];
+  mapState.selected = null; await saveMap({ rooms }); toast('House layout loaded');
+}
+
 function map() {
   const m = mapData();
   if (!mapState.floor || !m.floors.some(f => f.id === mapState.floor)) mapState.floor = m.floors[0].id;
@@ -488,13 +522,16 @@ function map() {
   const sel = edit && mapState.selected ? m.rooms.find(r => r.id === mapState.selected) : null;
   const placingAsset = mapState.placing ? store.assets[mapState.placing] : null;
 
-  const roomsSvg = rooms.map((r, i) => `<g class="room t${r.color ?? i % 6} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
-      <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8"/>
-      <rect class="sheen" x="${r.x + 3}" y="${r.y + 3}" width="${Math.max(0, r.w - 6)}" height="${Math.max(0, r.h - 6)}" rx="6"/>
-      <rect class="wall" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8"/>
-      <text class="room-label" x="${r.x + 12}" y="${r.y + 22}">${esc(r.name)}</text>
+  const groups = roomGroups(rooms);
+  const roomsSvg = rooms.map(r => {
+    const group = groups.get(roomKey(r)); const { main, color } = groupStyle(group); const solo = group.length === 1;
+    return `<g class="room t${color} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
+      <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="${solo ? 8 : 0}"/>
+      ${solo ? `<rect class="sheen" x="${r.x + 3}" y="${r.y + 3}" width="${Math.max(0, r.w - 6)}" height="${Math.max(0, r.h - 6)}" rx="6"/>
+      <rect class="wall" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8"/>` : `<path class="wall" d="${roomEdges(r, group).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>`}
+      ${main.id === r.id ? `<text class="room-label" x="${r.x + 12}" y="${r.y + 22}">${esc(r.name)}</text>` : ''}
       ${edit ? `<rect class="handle" data-handle="${r.id}" x="${r.x + r.w - 14}" y="${r.y + r.h - 14}" width="14" height="14" rx="3"/>` : ''}
-    </g>`).join('');
+    </g>`; }).join('');
   const markersSvg = placed.map(a => { const st = assetStatus(a.id); return `<g class="marker ${st.cls}" data-asset="${a.id}" transform="translate(${a.map.x},${a.map.y})">
       <circle class="halo" r="26"/><circle class="disc" r="18"/>
       <text class="glyph" y="6" text-anchor="middle">${assetIcon(a)}</text>
@@ -512,14 +549,15 @@ function map() {
         <div class="map-panel">
           <p class="hint">Drag on empty space to draw a room. Drag a room to move it, its corner to resize. Drag components to move them.</p>
           <label class="field"><span>Floor name</span><input type="text" value="${esc(floor.name)}" data-map="floor-name"></label>
-          <div class="row">${btn('+ Floor', 'map-add-floor')}${m.floors.length > 1 && !rooms.length && !placed.length ? btn('Delete floor', 'map-del-floor', '', 'btn small danger') : ''}</div>
+          <div class="row">${btn('+ Floor', 'map-add-floor')}${btn('Load traced house', 'map-load-house')}${m.floors.length > 1 && !rooms.length && !placed.length ? btn('Delete floor', 'map-del-floor', '', 'btn small danger') : ''}</div>
           <label class="field"><span>Floor plan image (optional)</span><span class="row">${m.bg[floor.id] ? btn('Remove image', 'map-bg-remove', '', 'btn small') : ''}<label class="btn small">Upload<input type="file" accept="image/*" data-action="map-bg" hidden></label></span></label>
         </div>
       </section>
       ${sel ? `<section class="card"><header><h2>Room</h2></header><div class="map-panel">
           <label class="field"><span>Name</span><input type="text" id="room-name" value="${esc(sel.name)}" data-map="room-name"></label>
-          <div class="swatches">${[0, 1, 2, 3, 4, 5].map(i => `<button type="button" class="swatch t${i} ${(sel.color ?? 0) === i ? 'on' : ''}" data-action="map-room-color" data-value="${i}" aria-label="Color ${i + 1}"></button>`).join('')}</div>
-          <div class="row">${btn('Delete room', 'map-del-room', '', 'btn small danger')}</div></div></section>` : ''}
+          <div class="swatches">${[0, 1, 2, 3, 4, 5].map(i => `<button type="button" class="swatch t${i} ${groupStyle(roomGroups(rooms).get(roomKey(sel)) || [sel]).color === i ? 'on' : ''}" data-action="map-room-color" data-value="${i}" aria-label="Color ${i + 1}"></button>`).join('')}</div>
+          <p class="hint">${(roomGroups(rooms).get(roomKey(sel)) || []).length > 1 ? `One of ${roomGroups(rooms).get(roomKey(sel)).length} pieces of ${esc(sel.name)}. ` : ''}Pieces with the same name join into one room, for L-shapes.</p>
+          <div class="row">${btn('Delete piece', 'map-del-room', '', 'btn small danger')}</div></div></section>` : ''}
       <section class="card"><header><h2>Place components</h2><span class="more">${unplaced.length}</span></header>
         ${placingAsset ? `<div class="callout small"><p>Click on the map to place <b>${esc(placingAsset.name)}</b>.</p>${btn('Cancel', 'map-place-cancel')}</div>` : ''}
         ${unplaced.length ? `<ul class="rows">${unplaced.map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(a.area || '')}</span></span>${btn('Place', 'map-place', `data-id="${a.id}"`)}</li>`).join('')}</ul>` : `<div class="empty">Every asset is on the map. Add more under Assets.</div>`}
@@ -540,8 +578,8 @@ function map() {
         </svg>`;
 
   return `
-    ${head('Map', { eyebrow: `${m.rooms.length} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
-    ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p>${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn primary small')}</div>` : ''}
+    ${head('Map', { eyebrow: `${new Set(m.rooms.map(r => `${r.floor}|${roomKey(r)}`)).size} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
+    ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p><div class="row">${btn('Load my house', 'map-load-house', '', 'btn primary small')}${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')}</div></div>` : ''}
     <div class="map-layout">
       <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset ? 'placing' : ''} ${iso ? 'iso' : ''}">
         ${iso ? isoSvg(rooms, placed, m.bg[floor.id]) : planSvg}
@@ -552,9 +590,10 @@ function map() {
 }
 
 // Isometric view: the same plan coordinates projected at 30°, back walls raised, markers standing on tiles.
-const ISO_H = 72;
+const ISO_H = 72, ISO_CHUNK = 40;
 const isoP = (x, y, z = 0) => ({ X: (x - y) * 0.866, Y: (x + y) * 0.5 - z });
 const isoPts = arr => arr.map(p => `${p.X.toFixed(1)},${p.Y.toFixed(1)}`).join(' ');
+// Floors first (always behind anything raised), then walls in short chunks and markers sorted by depth, labels last.
 function isoSvg(rooms, placed, bgData) {
   let gx0 = 0, gy0 = 0, gx1 = MAP_W, gy1 = MAP_H;
   if (!bgData && (rooms.length || placed.length)) {
@@ -565,7 +604,26 @@ function isoSvg(rooms, placed, bgData) {
   for (const r of rooms) all.push(isoP(r.x, r.y, ISO_H), isoP(r.x + r.w, r.y, ISO_H), isoP(r.x, r.y + r.h, ISO_H), isoP(r.x + r.w, r.y + r.h));
   for (const a of placed) all.push(isoP(a.map.x, a.map.y, 95), isoP(a.map.x - 30, a.map.y + 30, -30), isoP(a.map.x + 30, a.map.y - 30));
   const minX = Math.min(...all.map(p => p.X)) - 30, maxX = Math.max(...all.map(p => p.X)) + 30, minY = Math.min(...all.map(p => p.Y)) - 30, maxY = Math.max(...all.map(p => p.Y)) + 30;
-  const ents = [...rooms.map(r => ({ d: r.x + r.y, html: isoRoom(r) })), ...placed.map(a => ({ d: a.map.x + a.map.y + 1, html: isoMarker(a) }))].sort((p, q) => p.d - q.d);
+
+  const groups = roomGroups(rooms); const floors = [], bases = [], ents = [], labels = [];
+  for (const r of rooms) {
+    const group = groups.get(roomKey(r)); const { main, color } = groupStyle(group); const cls = `room t${color}`;
+    floors.push(`<g class="${cls}" data-room="${r.id}"><polygon class="floor" points="${isoPts([isoP(r.x, r.y), isoP(r.x + r.w, r.y), isoP(r.x + r.w, r.y + r.h), isoP(r.x, r.y + r.h)])}"/></g>`);
+    for (const e of roomEdges(r, group)) {
+      if (e.side === 'bottom' || e.side === 'right') { bases.push(`<g class="${cls}"><polyline class="base" points="${isoPts([isoP(e.x0, e.y0), isoP(e.x1, e.y1)])}"/></g>`); continue; }
+      const horiz = e.side === 'top', lo = horiz ? e.x0 : e.y0, hi = horiz ? e.x1 : e.y1;
+      for (let a = lo; a < hi; a += ISO_CHUNK) {
+        const b = Math.min(hi, a + ISO_CHUNK), a2 = a === lo ? a : a - 0.6, b2 = b === hi ? b : b + 0.6;
+        const p0 = horiz ? [a2, e.y0] : [e.x0, a2], p1 = horiz ? [b2, e.y0] : [e.x0, b2];
+        const A = isoP(...p0), B = isoP(...p1), AH = isoP(p0[0], p0[1], ISO_H), BH = isoP(p1[0], p1[1], ISO_H);
+        const post = (P, PH) => `<line class="post" x1="${P.X.toFixed(1)}" y1="${P.Y.toFixed(1)}" x2="${PH.X.toFixed(1)}" y2="${PH.Y.toFixed(1)}"/>`;
+        ents.push({ d: (p0[0] + p1[0] + p0[1] + p1[1]) / 2, k: 0, html: `<g class="${cls}" data-room="${r.id}"><polygon class="${horiz ? 'wall-t' : 'wall-l'}" points="${isoPts([A, B, BH, AH])}"/><polyline class="base" points="${isoPts([A, B])}"/><polyline class="wall-top" points="${isoPts([AH, BH])}"/>${a === lo ? post(A, AH) : ''}${b === hi ? post(B, BH) : ''}</g>` });
+      }
+    }
+    if (main.id === r.id) { const L = isoP(r.x + r.w / 2, r.y + 20); labels.push(`<text class="room-label" x="${L.X.toFixed(1)}" y="${L.Y.toFixed(1)}" text-anchor="middle">${esc(r.name)}</text>`); }
+  }
+  for (const a of placed) ents.push({ d: a.map.x + a.map.y, k: 1, html: isoMarker(a) });
+  ents.sort((p, q) => p.d - q.d || p.k - q.k);
   return `<svg id="map-svg" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map, isometric">
       <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
       <g transform="matrix(0.866,0.5,-0.866,0.5,0,0)">
@@ -573,21 +631,8 @@ function isoSvg(rooms, placed, bgData) {
         ${bgData ? `<image href="${bgData}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : ''}
         <rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" rx="12" fill="url(#grid)" class="gridfill"/>
       </g>
-      ${ents.map(e => e.html).join('')}
+      ${floors.join('')}${bases.join('')}${ents.map(e => e.html).join('')}${labels.join('')}
     </svg>`;
-}
-function isoRoom(r) {
-  const tl = isoP(r.x, r.y), tr = isoP(r.x + r.w, r.y), bl = isoP(r.x, r.y + r.h), br = isoP(r.x + r.w, r.y + r.h);
-  const tlH = isoP(r.x, r.y, ISO_H), trH = isoP(r.x + r.w, r.y, ISO_H), blH = isoP(r.x, r.y + r.h, ISO_H);
-  const label = isoP(r.x + r.w / 2, r.y + 20);
-  return `<g class="room t${r.color ?? 0}" data-room="${r.id}">
-      <polygon class="floor" points="${isoPts([tl, tr, br, bl])}"/>
-      <polygon class="wall-l" points="${isoPts([tl, bl, blH, tlH])}"/>
-      <polygon class="wall-t" points="${isoPts([tl, tr, trH, tlH])}"/>
-      <polyline class="wall-top" points="${isoPts([blH, tlH, trH])}"/>
-      <polyline class="base" points="${isoPts([bl, tl, tr])}"/>
-      <text class="room-label" x="${label.X.toFixed(1)}" y="${label.Y.toFixed(1)}" text-anchor="middle">${esc(r.name)}</text>
-    </g>`;
 }
 function isoMarker(a) {
   const { x, y } = a.map; const B = isoP(x, y); const st = assetStatus(a.id);
@@ -638,7 +683,7 @@ function bindMap() {
       const dx = snap(p.x - d.start.x), dy = snap(p.y - d.start.y);
       if (d.type === 'room') d.el.setAttribute('transform', `translate(${dx},${dy})`);
       else if (d.type === 'asset') d.el.setAttribute('transform', `translate(${clamp(snap(d.orig.x + dx), MAP_W)},${clamp(snap(d.orig.y + dy), MAP_H)})`);
-      else if (d.type === 'resize') { const w = Math.max(40, d.orig.w + dx), h = Math.max(40, d.orig.h + dy); d.el.querySelectorAll('rect.floor, rect.wall').forEach(r => { r.setAttribute('width', w); r.setAttribute('height', h); }); const sh = d.el.querySelector('rect.sheen'); sh.setAttribute('width', Math.max(0, w - 6)); sh.setAttribute('height', Math.max(0, h - 6)); const hd = d.el.querySelector('.handle'); hd.setAttribute('x', d.orig.x + w - 14); hd.setAttribute('y', d.orig.y + h - 14); }
+      else if (d.type === 'resize') { const w = Math.max(40, d.orig.w + dx), h = Math.max(40, d.orig.h + dy); d.el.querySelectorAll('rect.floor, rect.wall').forEach(r => { r.setAttribute('width', w); r.setAttribute('height', h); }); const pw = d.el.querySelector('path.wall'); if (pw) pw.setAttribute('d', `M${d.orig.x} ${d.orig.y}h${w}v${h}h${-w}z`); const sh = d.el.querySelector('rect.sheen'); if (sh) { sh.setAttribute('width', Math.max(0, w - 6)); sh.setAttribute('height', Math.max(0, h - 6)); } const hd = d.el.querySelector('.handle'); hd.setAttribute('x', d.orig.x + w - 14); hd.setAttribute('y', d.orig.y + h - 14); }
       else if (d.type === 'draw') { const x = Math.min(d.start.x, p.x), y = Math.min(d.start.y, p.y); d.rect.setAttribute('x', snap(x)); d.rect.setAttribute('y', snap(y)); d.rect.setAttribute('width', Math.abs(snap(p.x) - snap(d.start.x))); d.rect.setAttribute('height', Math.abs(snap(p.y) - snap(d.start.y))); }
       return;
     }
@@ -656,7 +701,7 @@ function bindMap() {
       toast(`${a ? a.name : 'Component'} placed`); return;
     }
     const handle = e.target.closest('[data-handle]'), marker = e.target.closest('[data-asset]'), rm = e.target.closest('[data-room]');
-    e.preventDefault(); svg.setPointerCapture(e.pointerId);
+    e.preventDefault(); try { svg.setPointerCapture(e.pointerId); } catch {}
     if (handle) mapState.drag = { type: 'resize', id: handle.dataset.handle, start: p, orig: { ...room(handle.dataset.handle) }, el: handle.closest('g') };
     else if (marker) mapState.drag = { type: 'asset', id: marker.dataset.asset, start: p, orig: { ...store.assets[marker.dataset.asset].map }, el: marker };
     else if (rm) { mapState.selected = rm.dataset.room; mapState.drag = { type: 'room', id: rm.dataset.room, start: p, orig: { ...room(rm.dataset.room) }, el: rm }; }
@@ -710,8 +755,9 @@ document.addEventListener('click', async e => {
   else if (a === 'map-goto') { mapState.floor = el.dataset.floor; mapState.mode = 'view'; }
   else if (a === 'map-add-floor') { const f = { id: uid(), name: `Floor ${m.floors.length + 1}` }; mapState.floor = f.id; saveMap({ floors: [...m.floors, f] }); const inp = $('[data-map="floor-name"]'); if (inp) { inp.focus(); inp.select(); } }
   else if (a === 'map-del-floor') { if (m.floors.length > 1 && confirm(`Delete ${floorName(mapState.floor)}?`)) { const bg = { ...m.bg }; delete bg[mapState.floor]; const floors = m.floors.filter(f => f.id !== mapState.floor); mapState.floor = floors[0].id; await saveMap({ floors, bg }); } }
-  else if (a === 'map-del-room') { if (confirm('Delete this room? Components stay where they are.')) { const id = mapState.selected; mapState.selected = null; await saveMap({ rooms: m.rooms.filter(r => r.id !== id) }); } }
-  else if (a === 'map-room-color') { await saveMap({ rooms: m.rooms.map(r => r.id === mapState.selected ? { ...r, color: Number(el.dataset.value) } : r) }); }
+  else if (a === 'map-del-room') { if (confirm('Delete this piece of the layout? Components stay where they are.')) { const id = mapState.selected; mapState.selected = null; await saveMap({ rooms: m.rooms.filter(r => r.id !== id) }); } }
+  else if (a === 'map-room-color') { const cur = m.rooms.find(r => r.id === mapState.selected); if (cur) await saveMap({ rooms: m.rooms.map(r => r.floor === cur.floor && roomKey(r) === roomKey(cur) ? { ...r, color: Number(el.dataset.value) } : r) }); }
+  else if (a === 'map-load-house') { await loadHouseLayout(); }
   else if (a === 'map-place') { mapState.placing = el.dataset.id; mapState.mode = 'edit'; if (state.route.view !== 'map') location.hash = '#/map'; else render(); }
   else if (a === 'map-place-cancel') { mapState.placing = null; render(); }
   else if (a === 'map-unplace') { const as = store.assets[el.dataset.id]; if (as) { const copy = { ...as }; delete copy.map; store.assets[as.id] = copy; await save('assets', { ...copy, map: null }); } }
@@ -721,7 +767,7 @@ document.addEventListener('change', async e => {
   const t = e.target;
   if (t.dataset.action === 'map-bg' && t.files[0]) { mapBackground(t.files[0]).catch(() => toast("Couldn't read that image.", true)); return; }
   if (t.dataset.map === 'floor-name') { const v = t.value.trim(); if (v) await saveMap({ floors: mapData().floors.map(f => f.id === mapState.floor ? { ...f, name: v } : f) }); }
-  if (t.dataset.map === 'room-name') { const v = t.value.trim(); if (v) await saveMap({ rooms: mapData().rooms.map(r => r.id === mapState.selected ? { ...r, name: v } : r) }); }
+  if (t.dataset.map === 'room-name') { const v = t.value.trim(); if (v) { const m = mapData(); const cur = m.rooms.find(r => r.id === mapState.selected); const twin = cur && m.rooms.find(r => r.id !== cur.id && r.floor === cur.floor && roomKey(r) === v.toLowerCase()); await saveMap({ rooms: m.rooms.map(r => r.id === mapState.selected ? { ...r, name: v, color: twin ? (twin.color ?? 0) : r.color } : r) }); } }
 });
 document.addEventListener('keydown', e => {
   if (state.route.view === 'map' && mapState.mode === 'edit' && (e.key === 'Delete' || e.key === 'Backspace') && mapState.selected && !/input|textarea/i.test(e.target.tagName)) {
