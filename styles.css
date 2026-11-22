@@ -16,7 +16,7 @@
   --danger: #b23a3a;
   --danger-soft: #f5e1e1;
   --on-accent: #ffffff;
-  --wall: #8f9b95; --ground: #eef1ed;
+  --wall: #8f9b95; --ground: #eef1ed; --door: #b8895a;
   --room-0: #dbe8e0; --room-1: #e1e4f1; --room-2: #efe6d3; --room-3: #e9e0ef; --room-4: #dde9f1; --room-5: #f0e2de;
   --blue-soft: #e3ecf6; --blue-ink: #2c4a73;
   --brown-soft: #efe6d6; --brown-ink: #6b4a1a;
@@ -35,7 +35,7 @@
     --rule: #2a332f; --rule-2: #222b27; --accent: #6fbf94; --accent-ink: #8ed3ad; --accent-soft: #1f3129;
     --amber: #e0a648; --amber-soft: #3a2f16; --danger: #e06b6b; --danger-soft: #3d1f1f; --grid: rgba(232,236,233,.04);
     --on-accent: #0e1a14; --blue-soft: #1d2b3c; --blue-ink: #9cc0ea; --brown-soft: #332a1b; --brown-ink: #e0c38f; --purple-soft: #2c2440; --purple-ink: #c9b7f0;
-    --wall: #55615b; --ground: #161c19;
+    --wall: #55615b; --ground: #161c19; --door: #a0744a;
     --room-0: #23342c; --room-1: #262a3d; --room-2: #38301f; --room-3: #31273a; --room-4: #213039; --room-5: #3a2a28;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -20px rgba(0,0,0,.8);
     color-scheme: dark;
@@ -46,7 +46,7 @@
   --rule: #2a332f; --rule-2: #222b27; --accent: #6fbf94; --accent-ink: #8ed3ad; --accent-soft: #1f3129;
   --amber: #e0a648; --amber-soft: #3a2f16; --danger: #e06b6b; --danger-soft: #3d1f1f; --grid: rgba(232,236,233,.04);
   --on-accent: #0e1a14; --blue-soft: #1d2b3c; --blue-ink: #9cc0ea; --brown-soft: #332a1b; --brown-ink: #e0c38f; --purple-soft: #2c2440; --purple-ink: #c9b7f0;
-  --wall: #55615b; --ground: #161c19;
+  --wall: #55615b; --ground: #161c19; --door: #a0744a;
   --room-0: #23342c; --room-1: #262a3d; --room-2: #38301f; --room-3: #31273a; --room-4: #213039; --room-5: #3a2a28;
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -20px rgba(0,0,0,.8);
   color-scheme: dark;
@@ -255,6 +255,14 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .room .wall { fill: none; stroke: var(--wall); stroke-width: 4; stroke-linejoin: round; }
 .room.sel .wall { stroke: var(--accent); stroke-dasharray: 8 5; }
 .map-wrap.edit .room { cursor: move; }
+.door .sill { stroke: var(--door); stroke-width: 4; stroke-linecap: butt; }
+.door .leaf { stroke: var(--door); stroke-width: 3; stroke-linecap: round; }
+.door .swing { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.door .hit { fill: transparent; cursor: pointer; }
+.map-wrap.edit .door .hit:hover ~ .sill, .map-wrap.edit .door:hover .sill { stroke: var(--danger); }
+.map-wrap.iso .door .sill { fill: var(--door); }
+.map-wrap.iso .door .leaf-l { fill: color-mix(in srgb, var(--door) 72%, #000); stroke: rgba(0,0,0,.3); stroke-width: 1; }
+.map-wrap.iso .door .leaf-t { fill: color-mix(in srgb, var(--door) 85%, #fff); stroke: rgba(0,0,0,.3); stroke-width: 1; }
 .room-label { font: 600 13px var(--display); fill: var(--ink); pointer-events: none; letter-spacing: .01em; }
 .handle { fill: var(--accent); stroke: var(--surface); stroke-width: 2; cursor: nwse-resize; }
 .drawing { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; opacity: .8; }

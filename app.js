@@ -327,7 +327,7 @@ function assets(id) {
   return `
     ${head('Assets', { eyebrow: 'things you maintain', actions: btn('+ Asset', 'new', 'data-coll="assets"', 'btn primary small') })}
     ${rows.length ? `<div class="grid">${Object.entries(groups).map(([area, items]) => `<section class="card"><header><h2>${esc(area)}</h2><span class="more">${items.length}</span></header><ul class="rows">${items.map(a => `<li><a class="t" href="#/assets/${a.id}">${esc(a.name)}<span class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</span></a><span class="m">${esc(a.year || '')}</span></li>`).join('')}</ul></section>`).join('')}</div>`
-    : `<div class="card"><div class="empty">No assets yet. Start with the furnace, the water heater and each car. Put the filter size or oil spec in Specs and it's one tap away at the store.</div></div>`}`;
+    : `<div class="card"><div class="empty">No assets yet. Start with the furnace, the water heater and each car. Put the filter size or oil spec in Specs and it's one tap away at the store.<div class="row" style="margin-top:10px">${btn('Add my cars', 'seed-cars', '', 'btn primary small')}</div></div></div>`}`;
 }
 
 function assetDetail(id) {
@@ -443,7 +443,7 @@ function settings() {
         <p style="margin:0;color:var(--ink-2);font-size:14px">Everything syncs to your account. Export a JSON copy now and then anyway; it restores with Import.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">${btn('Export JSON', 'export')}<label class="btn small">Import JSON<input type="file" accept="application/json" data-action="import" hidden></label></div></div></section>
       <section class="card"><header><h2>What's stored</h2></header><ul class="rows">${counts}</ul></section>
-      <section class="card"><header><h2>Starter content</h2></header><div style="padding:14px 16px;display:grid;gap:10px"><p style="margin:0;color:var(--ink-2);font-size:14px">Adds a typical house schedule, a how-to page and your current projects. Skips anything with the same name that already exists.</p><div>${btn('Add starter content', 'seed')}</div></div></section>
+      <section class="card"><header><h2>Starter content</h2></header><div style="padding:14px 16px;display:grid;gap:10px"><p style="margin:0;color:var(--ink-2);font-size:14px">Adds a typical house schedule, a how-to page and your current projects. Skips anything with the same name that already exists.</p><div class="row">${btn('Add starter content', 'seed')}${btn('Add my cars', 'seed-cars')}</div></div></section>
       <section class="card"><header><h2>Account</h2></header><div style="padding:14px 16px;font-size:14px;color:var(--ink-2)">Signed in as ${esc(state.user.email || state.user.displayName || '')}. Data is stored in Firebase under your user id and readable only by you.</div></section>
     </div>`;
 }
@@ -451,16 +451,18 @@ function settings() {
 // ---------------------------------------------------------------- map
 // Rooms live in one document (map/layout); each asset carries its own map position {floor, x, y}.
 const MAP_W = 1000, MAP_H = 640, SNAP = 10;
-const mapState = { floor: null, mode: 'view', view: 'iso', selected: null, placing: null, drag: null, pendingRender: false, hover: null };
+const mapState = { floor: null, mode: 'view', view: 'iso', selected: null, placing: null, tool: null, drag: null, pendingRender: false, hover: null };
 try { const v = localStorage.getItem('hb.mapview'); if (v === 'plan' || v === 'iso') mapState.view = v; } catch {}
 function mapData() {
   const m = store.map || {};
-  return { floors: m.floors && m.floors.length ? m.floors : [{ id: 'main', name: 'Main floor' }], rooms: m.rooms || [], bg: m.bg || {} };
+  return { floors: m.floors && m.floors.length ? m.floors : [{ id: 'main', name: 'Main floor' }], rooms: m.rooms || [], doors: m.doors || [], bg: m.bg || {} };
 }
 function floorName(id) { const f = mapData().floors.find(f => f.id === id); return f ? f.name : ''; }
 function roomAt(pos) { return mapData().rooms.find(r => r.floor === pos.floor && pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) || null; }
+const onWall = (d, r) => d.dir === 'h' ? (r.y === d.y || r.y + r.h === d.y) && d.x > r.x && d.x < r.x + r.w : (r.x === d.x || r.x + r.w === d.x) && d.y > r.y && d.y < r.y + r.h;
 async function saveMap(patch) {
   const m = { ...mapData(), ...patch, id: 'layout', updated: Date.now() };
+  if (patch.rooms) m.doors = m.doors.filter(d => m.rooms.some(r => r.floor === d.floor && onWall(d, r)));
   store.map = m; render();
   try { await setDoc(doc(db, 'users', state.user.uid, 'map', 'layout'), m); }
   catch (e) { toast(`Couldn't save the map (${e.code || e.message}).`, true); }
@@ -482,7 +484,7 @@ const roomKey = r => (r.name || '').trim().toLowerCase();
 function roomGroups(rooms) { const g = new Map(); for (const r of rooms) { const k = roomKey(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); } return g; }
 function groupStyle(group) { const main = [...group].sort((a, b) => b.w * b.h - a.w * a.h)[0]; return { main, color: main.color ?? 0 }; }
 // The exterior edges of one rectangle: each side is cut where sibling rectangles start or end, and pieces that face into a sibling are dropped.
-function roomEdges(r, group) {
+function roomEdges(r, group, doors = []) {
   const others = group.filter(o => o.id !== r.id);
   const inside = (x, y) => others.some(o => x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h);
   const sides = [['top', r.x, r.y, r.x + r.w, r.y, 0, -1], ['right', r.x + r.w, r.y, r.x + r.w, r.y + r.h, 1, 0], ['bottom', r.x, r.y + r.h, r.x + r.w, r.y + r.h, 0, 1], ['left', r.x, r.y, r.x, r.y + r.h, -1, 0]];
@@ -493,7 +495,12 @@ function roomEdges(r, group) {
     for (let i = 0; i + 1 < cuts.length; i++) {
       const a = cuts[i], b = cuts[i + 1], mid = (a + b) / 2;
       if (inside((horiz ? mid : x0) + nx * 0.5, (horiz ? y0 : mid) + ny * 0.5)) continue;
-      edges.push(horiz ? { side, x0: a, y0, x1: b, y1: y0 } : { side, x0, y0: a, x1: x0, y1: b });
+      // carve out any door that sits on this stretch of wall
+      const gaps = doors.filter(d => horiz ? d.dir === 'h' && d.y === y0 && d.x - d.w / 2 < b && d.x + d.w / 2 > a : d.dir === 'v' && d.x === x0 && d.y - d.w / 2 < b && d.y + d.w / 2 > a)
+        .map(d => [Math.max(a, (horiz ? d.x : d.y) - d.w / 2), Math.min(b, (horiz ? d.x : d.y) + d.w / 2)]).sort((p, q) => p[0] - q[0]);
+      let cur = a;
+      for (const [g0, g1] of gaps) { if (g0 > cur) edges.push(horiz ? { side, x0: cur, y0, x1: g0, y1: y0 } : { side, x0, y0: cur, x1: x0, y1: g0 }); cur = Math.max(cur, g1); }
+      if (cur < b) edges.push(horiz ? { side, x0: cur, y0, x1: b, y1: y0 } : { side, x0, y0: cur, x1: x0, y1: b });
     }
   }
   return edges;
@@ -504,11 +511,13 @@ const HOUSE_LAYOUT = [
   ['Study', 50, 30, 170, 100, 2], ['Guest Bath', 220, 40, 70, 90, 0], ['Hallway', 190, 130, 100, 40, 4], ['Hallway', 190, 170, 50, 130, 4],
   ['Guest Bedroom', 50, 130, 140, 170, 3], ['Primary Bedroom', 290, 100, 170, 150, 0], ['Guest Bedroom 2', 460, 60, 110, 110, 3], ['Primary Bath', 330, 250, 140, 90, 1],
   ['Living Room', 170, 300, 160, 220, 5], ['Living Room', 330, 340, 370, 260, 5], ['Garage', 700, 340, 240, 260, 1]];
+const HOUSE_DOORS = [[205, 130, 'h', 30], [255, 130, 'h', 36], [290, 150, 'v', 36], [190, 230, 'v', 36], [215, 300, 'h', 50], [360, 250, 'h', 36], [460, 135, 'v', 36], [700, 560, 'v', 36], [660, 600, 'h', 36], [820, 600, 'h', 120]];
 async function loadHouseLayout() {
   const m = mapData(); const here = m.rooms.filter(r => r.floor === mapState.floor);
   if (here.length && !confirm(`Replace the ${here.length} room${here.length > 1 ? 's' : ''} on ${floorName(mapState.floor)} with the traced house layout? Components keep their positions.`)) return;
   const rooms = [...m.rooms.filter(r => r.floor !== mapState.floor), ...HOUSE_LAYOUT.map(([name, x, y, w, h, color]) => ({ id: uid(), floor: mapState.floor, name, x, y, w, h, color }))];
-  mapState.selected = null; await saveMap({ rooms }); toast('House layout loaded');
+  const doors = [...m.doors.filter(d => d.floor !== mapState.floor), ...HOUSE_DOORS.map(([x, y, dir, w]) => ({ id: uid(), floor: mapState.floor, x, y, dir, w }))];
+  mapState.selected = null; await saveMap({ rooms, doors }); toast('House layout loaded');
 }
 
 function map() {
@@ -516,6 +525,7 @@ function map() {
   if (!mapState.floor || !m.floors.some(f => f.id === mapState.floor)) mapState.floor = m.floors[0].id;
   const floor = m.floors.find(f => f.id === mapState.floor);
   const rooms = m.rooms.filter(r => r.floor === floor.id);
+  const doors = m.doors.filter(d => d.floor === floor.id);
   const placed = list('assets').filter(a => a.map && a.map.floor === floor.id);
   const unplaced = list('assets').filter(a => !a.map).sort(by('name'));
   const edit = mapState.mode === 'edit';
@@ -524,14 +534,18 @@ function map() {
 
   const groups = roomGroups(rooms);
   const roomsSvg = rooms.map(r => {
-    const group = groups.get(roomKey(r)); const { main, color } = groupStyle(group); const solo = group.length === 1;
+    const group = groups.get(roomKey(r)); const { main, color } = groupStyle(group);
     return `<g class="room t${color} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
-      <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="${solo ? 8 : 0}"/>
-      ${solo ? `<rect class="sheen" x="${r.x + 3}" y="${r.y + 3}" width="${Math.max(0, r.w - 6)}" height="${Math.max(0, r.h - 6)}" rx="6"/>
-      <rect class="wall" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="8"/>` : `<path class="wall" d="${roomEdges(r, group).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>`}
+      <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>
+      <path class="wall" d="${roomEdges(r, group, doors).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>
       ${main.id === r.id ? `<text class="room-label" x="${r.x + 12}" y="${r.y + 22}">${esc(r.name)}</text>` : ''}
       ${edit ? `<rect class="handle" data-handle="${r.id}" x="${r.x + r.w - 14}" y="${r.y + r.h - 14}" width="14" height="14" rx="3"/>` : ''}
     </g>`; }).join('');
+  // plan doors: a sill across the gap, and for a hinged door its leaf and swing arc
+  const doorsSvg = doors.map(d => {
+    const h = d.dir === 'h', hw = d.w / 2, x0 = h ? d.x - hw : d.x, y0 = h ? d.y : d.y - hw, x1 = h ? d.x + hw : d.x, y1 = h ? d.y : d.y + hw;
+    const leaf = d.w >= 80 ? '' : h ? `<path class="swing" d="M${x0} ${y0 + d.w}A${d.w} ${d.w} 0 0 0 ${x1} ${y0}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + d.w}"/>` : `<path class="swing" d="M${x0 + d.w} ${y0}A${d.w} ${d.w} 0 0 1 ${x0} ${y1}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0 + d.w}" y2="${y0}"/>`;
+    return `<g class="door" data-door="${d.id}"><line class="sill" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/>${leaf}${edit ? `<rect class="hit" x="${d.x - hw - 6}" y="${d.y - hw - 6}" width="${d.w + 12}" height="${d.w + 12}"/>` : ''}</g>`; }).join('');
   const markersSvg = placed.map(a => { const st = assetStatus(a.id); return `<g class="marker ${st.cls}" data-asset="${a.id}" transform="translate(${a.map.x},${a.map.y})">
       <circle class="halo" r="26"/><circle class="disc" r="18"/>
       <text class="glyph" y="6" text-anchor="middle">${assetIcon(a)}</text>
@@ -547,7 +561,8 @@ function map() {
   const panel = edit ? `
       <section class="card"><header><h2>Editing ${esc(floor.name)}</h2></header>
         <div class="map-panel">
-          <p class="hint">Drag on empty space to draw a room. Drag a room to move it, its corner to resize. Drag components to move them.</p>
+          <p class="hint">${mapState.tool ? `<b>Click a wall</b> to add a ${mapState.tool === 'wide' ? 'wide opening' : 'door'}. Click a door to remove it. Esc to stop.` : 'Drag on empty space to draw a room. Drag a room to move it, its corner to resize. Drag components to move them. Click a door to remove it.'}</p>
+          <div class="row">${btn(mapState.tool === 'door' ? 'Placing doors…' : '+ Door', 'map-tool', 'data-value="door"', mapState.tool === 'door' ? 'btn small primary' : 'btn small')}${btn(mapState.tool === 'wide' ? 'Placing openings…' : '+ Wide opening', 'map-tool', 'data-value="wide"', mapState.tool === 'wide' ? 'btn small primary' : 'btn small')}</div>
           <label class="field"><span>Floor name</span><input type="text" value="${esc(floor.name)}" data-map="floor-name"></label>
           <div class="row">${btn('+ Floor', 'map-add-floor')}${btn('Load traced house', 'map-load-house')}${m.floors.length > 1 && !rooms.length && !placed.length ? btn('Delete floor', 'map-del-floor', '', 'btn small danger') : ''}</div>
           <label class="field"><span>Floor plan image (optional)</span><span class="row">${m.bg[floor.id] ? btn('Remove image', 'map-bg-remove', '', 'btn small') : ''}<label class="btn small">Upload<input type="file" accept="image/*" data-action="map-bg" hidden></label></span></label>
@@ -574,15 +589,15 @@ function map() {
   const planSvg = `<svg id="map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map">
           <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
           <rect width="${MAP_W}" height="${MAP_H}" class="ground"/>${bg}<rect width="${MAP_W}" height="${MAP_H}" fill="url(#grid)" class="gridfill"/>
-          <g id="rooms">${roomsSvg}</g><g id="markers">${markersSvg}</g><g id="scratch"></g>
+          <g id="rooms">${roomsSvg}</g><g id="doors">${doorsSvg}</g><g id="markers">${markersSvg}</g><g id="scratch"></g>
         </svg>`;
 
   return `
     ${head('Map', { eyebrow: `${new Set(m.rooms.map(r => `${r.floor}|${roomKey(r)}`)).size} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
     ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p><div class="row">${btn('Load my house', 'map-load-house', '', 'btn primary small')}${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')}</div></div>` : ''}
     <div class="map-layout">
-      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset ? 'placing' : ''} ${iso ? 'iso' : ''}">
-        ${iso ? isoSvg(rooms, placed, m.bg[floor.id]) : planSvg}
+      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset || mapState.tool ? 'placing' : ''} ${iso ? 'iso' : ''}">
+        ${iso ? isoSvg(rooms, doors, placed, m.bg[floor.id]) : planSvg}
         <div class="map-tip" id="map-tip" hidden></div>
       </div>
       <aside class="map-side">${panel}</aside>
@@ -594,7 +609,7 @@ const ISO_H = 72, ISO_CHUNK = 40;
 const isoP = (x, y, z = 0) => ({ X: (x - y) * 0.866, Y: (x + y) * 0.5 - z });
 const isoPts = arr => arr.map(p => `${p.X.toFixed(1)},${p.Y.toFixed(1)}`).join(' ');
 // Floors first (always behind anything raised), then walls in short chunks and markers sorted by depth, labels last.
-function isoSvg(rooms, placed, bgData) {
+function isoSvg(rooms, doors, placed, bgData) {
   let gx0 = 0, gy0 = 0, gx1 = MAP_W, gy1 = MAP_H;
   if (!bgData && (rooms.length || placed.length)) {
     const xs = [...rooms.flatMap(r => [r.x, r.x + r.w]), ...placed.map(a => a.map.x)], ys = [...rooms.flatMap(r => [r.y, r.y + r.h]), ...placed.map(a => a.map.y)];
@@ -609,7 +624,7 @@ function isoSvg(rooms, placed, bgData) {
   for (const r of rooms) {
     const group = groups.get(roomKey(r)); const { main, color } = groupStyle(group); const cls = `room t${color}`;
     floors.push(`<g class="${cls}" data-room="${r.id}"><polygon class="floor" points="${isoPts([isoP(r.x, r.y), isoP(r.x + r.w, r.y), isoP(r.x + r.w, r.y + r.h), isoP(r.x, r.y + r.h)])}"/></g>`);
-    for (const e of roomEdges(r, group)) {
+    for (const e of roomEdges(r, group, doors)) {
       if (e.side === 'bottom' || e.side === 'right') { bases.push(`<g class="${cls}"><polyline class="base" points="${isoPts([isoP(e.x0, e.y0), isoP(e.x1, e.y1)])}"/></g>`); continue; }
       const horiz = e.side === 'top', lo = horiz ? e.x0 : e.y0, hi = horiz ? e.x1 : e.y1;
       for (let a = lo; a < hi; a += ISO_CHUNK) {
@@ -622,6 +637,7 @@ function isoSvg(rooms, placed, bgData) {
     }
     if (main.id === r.id) { const L = isoP(r.x + r.w / 2, r.y + 20); labels.push(`<text class="room-label" x="${L.X.toFixed(1)}" y="${L.Y.toFixed(1)}" text-anchor="middle">${esc(r.name)}</text>`); }
   }
+  for (const d of doors) { const { sill, leaf } = isoDoor(d); bases.push(sill); if (leaf) ents.push({ d: d.x + d.y, k: 0.5, html: leaf }); }
   for (const a of placed) ents.push({ d: a.map.x + a.map.y, k: 1, html: isoMarker(a) });
   ents.sort((p, q) => p.d - q.d || p.k - q.k);
   return `<svg id="map-svg" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map, isometric">
@@ -633,6 +649,16 @@ function isoSvg(rooms, placed, bgData) {
       </g>
       ${floors.join('')}${bases.join('')}${ents.map(e => e.html).join('')}${labels.join('')}
     </svg>`;
+}
+// A door is a sill across the gap and, unless it is a wide opening, a leaf standing open at one jamb, swung into the room.
+function isoDoor(d) {
+  const h = d.dir === 'h', hw = d.w / 2, Hd = ISO_H * 0.85;
+  const sillPts = h ? [isoP(d.x - hw, d.y - 2), isoP(d.x + hw, d.y - 2), isoP(d.x + hw, d.y + 2), isoP(d.x - hw, d.y + 2)] : [isoP(d.x - 2, d.y - hw), isoP(d.x + 2, d.y - hw), isoP(d.x + 2, d.y + hw), isoP(d.x - 2, d.y + hw)];
+  const sill = `<g class="door iso" data-door="${d.id}"><polygon class="sill" points="${isoPts(sillPts)}"/></g>`;
+  if (d.w >= 80) return { sill, leaf: '' };
+  const jx = h ? d.x - hw : d.x, jy = h ? d.y : d.y - hw;
+  const pts = h ? [isoP(jx, jy), isoP(jx, jy + d.w), isoP(jx, jy + d.w, Hd), isoP(jx, jy, Hd)] : [isoP(jx, jy), isoP(jx + d.w, jy), isoP(jx + d.w, jy, Hd), isoP(jx, jy, Hd)];
+  return { sill, leaf: `<g class="door iso" data-door="${d.id}"><polygon class="${h ? 'leaf-l' : 'leaf-t'}" points="${isoPts(pts)}"/></g>` };
 }
 function isoMarker(a) {
   const { x, y } = a.map; const B = isoP(x, y); const st = assetStatus(a.id);
@@ -700,6 +726,9 @@ function bindMap() {
       if (a) save('assets', { ...a, map: { floor: mapState.floor, x: clamp(snap(p.x), MAP_W), y: clamp(snap(p.y), MAP_H) } });
       toast(`${a ? a.name : 'Component'} placed`); return;
     }
+    const door = e.target.closest('[data-door]');
+    if (door) { saveMap({ doors: mapData().doors.filter(d => d.id !== door.dataset.door) }); toast('Door removed'); return; }
+    if (mapState.tool) { placeDoor(p, mapState.tool === 'wide' ? 120 : 36); return; }
     const handle = e.target.closest('[data-handle]'), marker = e.target.closest('[data-asset]'), rm = e.target.closest('[data-room]');
     e.preventDefault(); try { svg.setPointerCapture(e.pointerId); } catch {}
     if (handle) mapState.drag = { type: 'resize', id: handle.dataset.handle, start: p, orig: { ...room(handle.dataset.handle) }, el: handle.closest('g') };
@@ -733,6 +762,23 @@ function bindMap() {
   wrap.parentElement.addEventListener('pointerover', e => { const li = e.target.closest('[data-hl]'); svg.querySelectorAll('.marker.lit').forEach(m => m.classList.remove('lit')); if (li) { const mk = svg.querySelector(`[data-asset="${li.dataset.hl}"]`); if (mk) mk.classList.add('lit'); } });
 }
 
+// Put a door on the nearest wall to the click, centered on the click and kept inside that stretch of wall.
+function placeDoor(p, w) {
+  const m = mapData(); const rooms = m.rooms.filter(r => r.floor === mapState.floor); const groups = roomGroups(rooms);
+  let best = null;
+  for (const r of rooms) for (const e of roomEdges(r, groups.get(roomKey(r)))) {
+    const horiz = e.y0 === e.y1, len = horiz ? e.x1 - e.x0 : e.y1 - e.y0; if (len < w) continue;
+    const t = horiz ? Math.min(Math.max(p.x, e.x0), e.x1) : Math.min(Math.max(p.y, e.y0), e.y1);
+    const dist = horiz ? Math.hypot(p.x - t, p.y - e.y0) : Math.hypot(p.x - e.x0, p.y - t);
+    if (dist <= 16 && (!best || dist < best.dist)) best = { dist, e, horiz, t };
+  }
+  if (!best) { toast('Click closer to a wall'); return; }
+  const { e, horiz } = best; const lo = (horiz ? e.x0 : e.y0) + w / 2, hi = (horiz ? e.x1 : e.y1) - w / 2;
+  const c = Math.min(Math.max(Math.round(best.t / SNAP) * SNAP, lo), hi);
+  const d = { id: uid(), floor: mapState.floor, x: horiz ? c : e.x0, y: horiz ? e.y0 : c, dir: horiz ? 'h' : 'v', w };
+  saveMap({ doors: [...m.doors, d] });
+}
+
 async function mapBackground(file) {
   const img = new Image(); const url = URL.createObjectURL(file);
   await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
@@ -749,12 +795,13 @@ async function mapBackground(file) {
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-action^="map-"]'); if (!el) return;
   const a = el.dataset.action; const m = mapData();
-  if (a === 'map-mode') { mapState.mode = el.dataset.value; mapState.selected = null; mapState.placing = null; render(); }
+  if (a === 'map-mode') { mapState.mode = el.dataset.value; mapState.selected = null; mapState.placing = null; mapState.tool = null; render(); }
+  else if (a === 'map-tool') { mapState.tool = mapState.tool === el.dataset.value ? null : el.dataset.value; mapState.placing = null; render(); }
   else if (a === 'map-view') { mapState.view = el.dataset.value; try { localStorage.setItem('hb.mapview', mapState.view); } catch {} render(); }
   else if (a === 'map-floor') { mapState.floor = el.dataset.id; mapState.selected = null; render(); }
   else if (a === 'map-goto') { mapState.floor = el.dataset.floor; mapState.mode = 'view'; }
   else if (a === 'map-add-floor') { const f = { id: uid(), name: `Floor ${m.floors.length + 1}` }; mapState.floor = f.id; saveMap({ floors: [...m.floors, f] }); const inp = $('[data-map="floor-name"]'); if (inp) { inp.focus(); inp.select(); } }
-  else if (a === 'map-del-floor') { if (m.floors.length > 1 && confirm(`Delete ${floorName(mapState.floor)}?`)) { const bg = { ...m.bg }; delete bg[mapState.floor]; const floors = m.floors.filter(f => f.id !== mapState.floor); mapState.floor = floors[0].id; await saveMap({ floors, bg }); } }
+  else if (a === 'map-del-floor') { if (m.floors.length > 1 && confirm(`Delete ${floorName(mapState.floor)}?`)) { const bg = { ...m.bg }; delete bg[mapState.floor]; const floors = m.floors.filter(f => f.id !== mapState.floor); const doors = m.doors.filter(d => d.floor !== mapState.floor); mapState.floor = floors[0].id; await saveMap({ floors, bg, doors }); } }
   else if (a === 'map-del-room') { if (confirm('Delete this piece of the layout? Components stay where they are.')) { const id = mapState.selected; mapState.selected = null; await saveMap({ rooms: m.rooms.filter(r => r.id !== id) }); } }
   else if (a === 'map-room-color') { const cur = m.rooms.find(r => r.id === mapState.selected); if (cur) await saveMap({ rooms: m.rooms.map(r => r.floor === cur.floor && roomKey(r) === roomKey(cur) ? { ...r, color: Number(el.dataset.value) } : r) }); }
   else if (a === 'map-load-house') { await loadHouseLayout(); }
@@ -773,7 +820,7 @@ document.addEventListener('keydown', e => {
   if (state.route.view === 'map' && mapState.mode === 'edit' && (e.key === 'Delete' || e.key === 'Backspace') && mapState.selected && !/input|textarea/i.test(e.target.tagName)) {
     e.preventDefault(); const id = mapState.selected; mapState.selected = null; saveMap({ rooms: mapData().rooms.filter(r => r.id !== id) });
   }
-  if (e.key === 'Escape' && mapState.placing) { mapState.placing = null; render(); }
+  if (e.key === 'Escape' && (mapState.placing || mapState.tool)) { mapState.placing = null; mapState.tool = null; render(); }
 });
 
 // ---------------------------------------------------------------- editor dialog
@@ -886,6 +933,24 @@ async function seed() {
   try { await batch.commit(); toast(`Added ${n} starter items`); } catch (e) { toast(`Couldn't add starter content (${e.code || e.message})`, true); }
 }
 
+// The two cars, each with a Subaru-style service schedule linked to it. Parked in the garage if the map has one.
+async function seedCars() {
+  const cars = [
+    { name: '2020 Subaru Legacy', year: 2020, make: 'Subaru Legacy', type: 'Sedan', specs: 'Oil: 0W-20 synthetic. Tires: 225/65R17 (check the door jamb). Add VIN, plate and last service mileage.' },
+    { name: '2017 Subaru Crosstrek', year: 2017, make: 'Subaru Crosstrek', type: 'Crossover', specs: 'Oil: 0W-20 synthetic. Tires: 225/55R17 (check the door jamb). Add VIN, plate and last service mileage.' }];
+  const service = [['Oil and filter change', 6, 'months'], ['Rotate tires', 6, 'months'], ['Replace engine and cabin air filters', 12, 'months'], ['Replace wiper blades', 12, 'months'], ['Brake fluid exchange', 36, 'months'], ['Registration renewal', 12, 'months']];
+  const existing = list('assets'); const garage = mapData().rooms.find(r => roomKey(r) === 'garage');
+  const batch = writeBatch(db); let n = 0; const now = Date.now();
+  cars.forEach((c, i) => {
+    if (existing.some(a => a.name.toLowerCase() === c.name.toLowerCase())) return;
+    const id = uid(); const map = garage ? { floor: garage.floor, x: garage.x + Math.round(garage.w * (i ? 0.7 : 0.3) / SNAP) * SNAP, y: garage.y + Math.round(garage.h * 0.55 / SNAP) * SNAP } : null;
+    batch.set(userDoc('assets', id), { ...c, id, area: 'Car', serial: null, purchased: null, contact: null, manual: null, notes: '', map, created: now, updated: now }); n++;
+    for (const [task, every, unit] of service) { const sid = uid(); batch.set(userDoc('schedule', sid), { id: sid, task, area: 'Car', asset: id, every, unit, nextDue: null, lastDone: null, season: null, notes: 'Press Done after the next service and the date rolls forward.', created: now, updated: now }); n++; }
+  });
+  if (!n) { toast('Both cars are already here'); return; }
+  try { await batch.commit(); toast(`Added both cars and ${n - 2} service items`); } catch (e) { toast(`Couldn't add the cars (${e.code || e.message})`, true); }
+}
+
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-action]'); if (!el) return;
   const a = el.dataset.action;
@@ -902,6 +967,7 @@ document.addEventListener('click', async e => {
   else if (a === 'cancel-page') { state.editing.page = null; render(); }
   else if (a === 'save-page') { const p = store.pages[el.dataset.id]; state.editing.page = null; await save('pages', { ...p, body: $('#page-editor').value }); toast('Page saved'); }
   else if (a === 'seed') seed();
+  else if (a === 'seed-cars') seedCars();
   else if (a === 'export') exportJSON();
   else if (a === 'theme') { const v = el.dataset.value; try { if (v === 'system') { delete document.documentElement.dataset.theme; localStorage.removeItem('hb.theme'); } else { document.documentElement.dataset.theme = v; localStorage.setItem('hb.theme', v); } } catch {} render(); }
 });
