@@ -3,7 +3,7 @@
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import { initializeFirestore, getFirestore, persistentLocalCache, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
+import { initializeFirestore, getFirestore, persistentLocalCache, collection, doc, getDoc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyAw57oCNI8tpI6Lqs7KdoyvI_MGPZDFnYY",
@@ -94,7 +94,7 @@ const SCHEMA = {
 const COLLS = Object.keys(SCHEMA);
 
 // ---------------------------------------------------------------- state
-const state = { user: null, ready: false, route: { view: 'home', id: null }, filters: {}, editing: {} };
+const state = { user: null, owner: null, ready: false, route: { view: 'home', id: null }, filters: {}, editing: {} };
 const store = Object.fromEntries(COLLS.map(c => [c, {}]));
 const list = c => Object.values(store[c]);
 const assetName = id => (store.assets[id] || {}).name || '';
@@ -108,7 +108,9 @@ try { db = initializeFirestore(app, { localCache: persistentLocalCache() }); } c
 const provider = new GoogleAuthProvider();
 let unsubs = [];
 
-function userDoc(coll, id) { return doc(db, 'users', state.user.uid, coll, id); }
+// All household data lives under one owner's user id; the access list says which accounts may open it.
+const dataUid = () => state.owner || state.user.uid;
+function userDoc(coll, id) { return doc(db, 'users', dataUid(), coll, id); }
 
 async function save(coll, data) {
   const id = data.id || uid();
@@ -130,10 +132,10 @@ async function remove(coll, id) {
 
 function subscribeAll() {
   unsubscribeAll();
-  unsubs.push(onSnapshot(doc(db, 'users', state.user.uid, 'map', 'layout'), snap => { store.map = snap.exists() ? snap.data() : null; render(); }, () => {}));
+  unsubs.push(onSnapshot(doc(db, 'users', dataUid(), 'map', 'layout'), snap => { store.map = snap.exists() ? snap.data() : null; render(); }, () => {}));
   let pending = COLLS.length;
   for (const c of COLLS) {
-    const u = onSnapshot(collection(db, 'users', state.user.uid, c), snap => {
+    const u = onSnapshot(collection(db, 'users', dataUid(), c), snap => {
       const next = {};
       snap.forEach(d => { next[d.id] = d.data(); });
       store[c] = next;
@@ -156,12 +158,23 @@ async function signIn() {
   }
 }
 
-onAuthStateChanged(auth, user => {
-  state.user = user; state.ready = false;
+onAuthStateChanged(auth, async user => {
+  state.user = user; state.owner = null; state.ready = false;
   for (const c of COLLS) store[c] = {};
   store.map = null;
-  if (user) { $('#who').textContent = user.displayName || user.email || ''; subscribeAll(); }
-  else unsubscribeAll();
+  unsubscribeAll();
+  if (user) {
+    // Only accounts on the household list get in; the list is kept outside the app.
+    let owner = null;
+    try { const snap = await getDoc(doc(db, 'access', String(user.email || '').toLowerCase())); if (snap.exists()) owner = snap.data().owner; }
+    catch { owner = user.uid; } // rules without an access list yet: fall back to this account's own data
+    if (!owner) {
+      await signOut(auth);
+      const msg = $('#landing-msg'); msg.textContent = `${user.email || 'That account'} isn't on the household list, so there is nothing to show. Ask the owner to add it.`; msg.hidden = false;
+      return;
+    }
+    state.owner = owner; $('#who').textContent = user.displayName || user.email || ''; subscribeAll();
+  }
   render();
 });
 
@@ -444,7 +457,7 @@ function settings() {
         <div style="display:flex;gap:8px;flex-wrap:wrap">${btn('Export JSON', 'export')}<label class="btn small">Import JSON<input type="file" accept="application/json" data-action="import" hidden></label></div></div></section>
       <section class="card"><header><h2>What's stored</h2></header><ul class="rows">${counts}</ul></section>
       <section class="card"><header><h2>Starter content</h2></header><div style="padding:14px 16px;display:grid;gap:10px"><p style="margin:0;color:var(--ink-2);font-size:14px">Adds a typical house schedule, a how-to page and your current projects. Skips anything with the same name that already exists.</p><div class="row">${btn('Add starter content', 'seed')}${btn('Add my cars', 'seed-cars')}</div></div></section>
-      <section class="card"><header><h2>Account</h2></header><div style="padding:14px 16px;font-size:14px;color:var(--ink-2)">Signed in as ${esc(state.user.email || state.user.displayName || '')}. Data is stored in Firebase under your user id and readable only by you.</div></section>
+      <section class="card"><header><h2>Account</h2></header><div style="padding:14px 16px;font-size:14px;color:var(--ink-2)">Signed in as ${esc(state.user.email || state.user.displayName || '')}. One shared household logbook, readable only by the accounts on its access list.</div></section>
     </div>`;
 }
 
@@ -464,7 +477,7 @@ async function saveMap(patch) {
   const m = { ...mapData(), ...patch, id: 'layout', updated: Date.now() };
   if (patch.rooms) m.doors = m.doors.filter(d => m.rooms.some(r => r.floor === d.floor && onWall(d, r)));
   store.map = m; render();
-  try { await setDoc(doc(db, 'users', state.user.uid, 'map', 'layout'), m); }
+  try { await setDoc(doc(db, 'users', dataUid(), 'map', 'layout'), m); }
   catch (e) { toast(`Couldn't save the map (${e.code || e.message}).`, true); }
 }
 function assetStatus(id) {

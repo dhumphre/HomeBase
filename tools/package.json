@@ -3,5 +3,9 @@
   "private": true,
   "type": "module",
   "description": "Command-line access to the Home Base Firestore data for Claude Code (needs a service-account key kept outside the repo).",
-  "dependencies": { "firebase-admin": "^13.4.0" }
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "firebase-admin": "^13.4.0",
+    "zod": "^4.6.7"
+  }
 }
