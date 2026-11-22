@@ -40,6 +40,7 @@ const SCHEMA = {
   assets: { one: 'Asset', many: 'Assets', title: 'name', blurb: 'A furnace, a car, a mower: anything you maintain.', fields: [
     { k: 'name', l: 'Name', t: 'text', req: true, wide: true },
     { k: 'area', l: 'Area', t: 'select', opts: AREAS },
+    { k: 'room', l: 'Room on the map', t: 'room' },
     { k: 'type', l: 'Type', t: 'text', ph: 'Furnace, water heater, sedan' },
     { k: 'make', l: 'Make / model', t: 'text' },
     { k: 'serial', l: 'Serial / VIN', t: 'text' },
@@ -350,8 +351,8 @@ function assetDetail(id) {
   const sched = list('schedule').filter(s => s.asset === id).sort((x, y) => (x.nextDue || '9999') > (y.nextDue || '9999') ? 1 : -1);
   const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-  const room = a.map ? roomAt(a.map) : null;
-  const props = [['Area', chip(a.area)], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">open ↗</a>` : ''], ['On map', a.map ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
+  const room = assetRoom(a);
+  const props = [['Area', chip(a.area)], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">open ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
   return `
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
@@ -464,7 +465,7 @@ function settings() {
 // ---------------------------------------------------------------- map
 // Rooms live in one document (map/layout); each asset carries its own map position {floor, x, y}.
 const MAP_W = 1000, MAP_H = 640, SNAP = 10;
-const mapState = { floor: null, mode: 'view', view: 'iso', selected: null, placing: null, tool: null, drag: null, pendingRender: false, hover: null };
+const mapState = { floor: null, mode: 'view', view: 'iso', selected: null, placing: null, tool: null, drag: null, pendingRender: false, hover: null, cam: null, focus: null };
 try { const v = localStorage.getItem('hb.mapview'); if (v === 'plan' || v === 'iso') mapState.view = v; } catch {}
 function mapData() {
   const m = store.map || {};
@@ -472,6 +473,48 @@ function mapData() {
 }
 function floorName(id) { const f = mapData().floors.find(f => f.id === id); return f ? f.name : ''; }
 function roomAt(pos) { return mapData().rooms.find(r => r.floor === pos.floor && pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) || null; }
+// A component is either assigned to a room (map:{floor, room}) and laid out automatically, or pinned by hand (map:{floor, x, y}).
+function assetRoom(a) { if (!a || !a.map) return null; if (a.map.room) return mapData().rooms.find(r => r.floor === a.map.floor && roomKey(r) === a.map.room) || null; return a.map.x != null ? roomAt(a.map) : null; }
+function roomValue(a) { if (!a || !a.map) return ''; if (a.map.room) return `${a.map.floor}|${a.map.room}`; const r = assetRoom(a); return r ? `${r.floor}|${roomKey(r)}` : ''; }
+function roomOptions(cur) {
+  const m = mapData(); const seen = new Set(); const opts = [];
+  for (const f of m.floors) for (const r of m.rooms.filter(r => r.floor === f.id).sort(by('name'))) { const v = `${f.id}|${roomKey(r)}`; if (seen.has(v)) continue; seen.add(v); opts.push(`<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(r.name)}${m.floors.length > 1 ? ` · ${esc(f.name)}` : ''}</option>`); }
+  return `<option value="">— not on the map —</option>${opts.join('')}`;
+}
+const CELL = 60;
+// Where every component on a floor stands: hand-placed ones as stored, room-assigned ones on a grid inside their room (shrinking the grid when a room is crowded).
+function resolvePlaced(floorId) {
+  const m = mapData(); const rooms = m.rooms.filter(r => r.floor === floorId); const groups = roomGroups(rooms);
+  const out = [], byRoom = new Map();
+  for (const a of list('assets')) {
+    if (!a.map || a.map.floor !== floorId) continue;
+    if (a.map.room) { if (!byRoom.has(a.map.room)) byRoom.set(a.map.room, []); byRoom.get(a.map.room).push(a); }
+    else if (a.map.x != null) out.push({ a, x: a.map.x, y: a.map.y, auto: false });
+  }
+  for (const [k, items] of byRoom) {
+    items.sort(by('name')); const group = groups.get(k);
+    if (!group) { items.forEach(a => out.push({ a, x: null, y: null, auto: true, lost: true })); continue; }
+    const pieces = [...group].sort((p, q) => q.w * q.h - p.w * p.h); const pad = 26; let cell = CELL;
+    const cap = c => pieces.reduce((n, r) => n + Math.max(1, Math.floor((r.w - 2 * pad) / c)) * Math.max(1, Math.floor((r.h - 2 * pad) / c)), 0);
+    while (cap(cell) < items.length && cell > 34) cell -= 4;
+    let i = 0;
+    for (const r of pieces) {
+      const cols = Math.max(1, Math.floor((r.w - 2 * pad) / cell)), rows = Math.max(1, Math.floor((r.h - 2 * pad) / cell));
+      const ox = r.x + (r.w - cols * cell) / 2 + cell / 2, oy = r.y + (r.h - rows * cell) / 2 + cell / 2;
+      for (let n = 0; n < cols * rows && i < items.length; n++, i++) out.push({ a: items[i], x: Math.round(ox + (n % cols) * cell), y: Math.round(oy + Math.floor(n / cols) * cell), auto: true, col: n % cols });
+    }
+    for (; i < items.length; i++) out.push({ a: items[i], x: Math.round(pieces[0].x + pieces[0].w / 2), y: Math.round(pieces[0].y + pieces[0].h / 2), auto: true });
+  }
+  return out;
+}
+const WORST = ['over', 'soon', 'todo', 'ok', 'none'];
+const shortName = n => { n = String(n || ''); return n.length > 15 ? n.slice(0, 14).trimEnd() + '…' : n; };
+// Per room: how many components and the worst status among them, for the badge under the room name.
+function roomSummary(placed, rooms) {
+  const out = new Map();
+  for (const p of placed) { const r = p.a.map.room ? rooms.find(x => roomKey(x) === p.a.map.room) : roomAt({ floor: p.a.map.floor, x: p.x, y: p.y }); if (!r) continue; const k = roomKey(r); const cls = assetStatus(p.a.id).cls; const cur = out.get(k) || { n: 0, cls: 'none' }; cur.n++; if (WORST.indexOf(cls) < WORST.indexOf(cur.cls)) cur.cls = cls; out.set(k, cur); }
+  return out;
+}
 const onWall = (d, r) => d.dir === 'h' ? (r.y === d.y || r.y + r.h === d.y) && d.x > r.x && d.x < r.x + r.w : (r.x === d.x || r.x + r.w === d.x) && d.y > r.y && d.y < r.y + r.h;
 async function saveMap(patch) {
   const m = { ...mapData(), ...patch, id: 'layout', updated: Date.now() };
@@ -539,8 +582,9 @@ function map() {
   const floor = m.floors.find(f => f.id === mapState.floor);
   const rooms = m.rooms.filter(r => r.floor === floor.id);
   const doors = m.doors.filter(d => d.floor === floor.id);
-  const placed = list('assets').filter(a => a.map && a.map.floor === floor.id);
-  const unplaced = list('assets').filter(a => !a.map).sort(by('name'));
+  const entries = resolvePlaced(floor.id); const placed = entries.filter(p => !p.lost);
+  const unplaced = list('assets').filter(a => !a.map || entries.some(p => p.lost && p.a.id === a.id)).sort(by('name'));
+  const summary = roomSummary(placed, rooms);
   const edit = mapState.mode === 'edit';
   const sel = edit && mapState.selected ? m.rooms.find(r => r.id === mapState.selected) : null;
   const placingAsset = mapState.placing ? store.assets[mapState.placing] : null;
@@ -551,7 +595,7 @@ function map() {
     return `<g class="room t${color} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
       <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>
       <path class="wall" d="${roomEdges(r, group, doors).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>
-      ${main.id === r.id ? `<text class="room-label" x="${r.x + 12}" y="${r.y + 22}">${esc(r.name)}</text>` : ''}
+      ${main.id === r.id ? `<text class="room-label" x="${r.x + 12}" y="${r.y + 22}" data-focus="${esc(roomKey(r))}">${esc(r.name)}</text>${badge(summary.get(roomKey(r)), r.x + 12, r.y + 30, 'start')}` : ''}
       ${edit ? `<rect class="handle" data-handle="${r.id}" x="${r.x + r.w - 14}" y="${r.y + r.h - 14}" width="14" height="14" rx="3"/>` : ''}
     </g>`; }).join('');
   // plan doors: a sill across the gap, and for a hinged door its leaf and swing arc
@@ -559,22 +603,22 @@ function map() {
     const h = d.dir === 'h', hw = d.w / 2, x0 = h ? d.x - hw : d.x, y0 = h ? d.y : d.y - hw, x1 = h ? d.x + hw : d.x, y1 = h ? d.y : d.y + hw;
     const leaf = d.w >= 80 ? '' : h ? `<path class="swing" d="M${x0} ${y0 + d.w}A${d.w} ${d.w} 0 0 0 ${x1} ${y0}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + d.w}"/>` : `<path class="swing" d="M${x0 + d.w} ${y0}A${d.w} ${d.w} 0 0 1 ${x0} ${y1}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0 + d.w}" y2="${y0}"/>`;
     return `<g class="door" data-door="${d.id}"><line class="sill" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/>${leaf}${edit ? `<rect class="hit" x="${d.x - hw - 6}" y="${d.y - hw - 6}" width="${d.w + 12}" height="${d.w + 12}"/>` : ''}</g>`; }).join('');
-  const markersSvg = placed.map(a => { const st = assetStatus(a.id); return `<g class="marker ${st.cls}" data-asset="${a.id}" transform="translate(${a.map.x},${a.map.y})">
-      <circle class="halo" r="26"/><circle class="disc" r="18"/>
-      <text class="glyph" y="6" text-anchor="middle">${assetIcon(a)}</text>
-      <text class="mlabel" y="36" text-anchor="middle">${esc(a.name)}</text>
+  const markersSvg = placed.map(({ a, x, y, auto, col }) => { const st = assetStatus(a.id); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
+      <circle class="halo" r="26"/><circle class="disc" r="19"/>
+      <text class="glyph" y="7" text-anchor="middle">${assetIcon(a)}</text>
+      <text class="mlabel" y="${col % 2 ? 48 : 36}" text-anchor="middle">${esc(shortName(a.name))}</text>
     </g>`; }).join('');
   const bg = m.bg[floor.id] ? `<image href="${m.bg[floor.id]}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : '';
   const iso = !edit && mapState.view === 'iso';
 
   const floorTabs = `<div class="seg">${m.floors.map(f => `<button type="button" aria-pressed="${f.id === floor.id}" data-action="map-floor" data-id="${f.id}">${esc(f.name)}</button>`).join('')}</div>`;
   const viewTabs = edit ? '' : `<div class="seg"><button type="button" aria-pressed="${iso}" data-action="map-view" data-value="iso">3D</button><button type="button" aria-pressed="${!iso}" data-action="map-view" data-value="plan">Plan</button></div>`;
-  const statusRows = placed.map(a => ({ a, st: assetStatus(a.id) })).sort((x, y) => ['over', 'soon', 'todo', 'ok', 'none'].indexOf(x.st.cls) - ['over', 'soon', 'todo', 'ok', 'none'].indexOf(y.st.cls));
+  const statusRows = placed.map(({ a }) => ({ a, st: assetStatus(a.id) })).sort((x, y) => ['over', 'soon', 'todo', 'ok', 'none'].indexOf(x.st.cls) - ['over', 'soon', 'todo', 'ok', 'none'].indexOf(y.st.cls));
 
   const panel = edit ? `
       <section class="card"><header><h2>Editing ${esc(floor.name)}</h2></header>
         <div class="map-panel">
-          <p class="hint">${mapState.tool ? `<b>Click a wall</b> to add a ${mapState.tool === 'wide' ? 'wide opening' : 'door'}. Click a door to remove it. Esc to stop.` : 'Drag on empty space to draw a room. Drag a room to move it, its corner to resize. Drag components to move them. Click a door to remove it.'}</p>
+          <p class="hint">${mapState.tool ? `<b>Click a wall</b> to add a ${mapState.tool === 'wide' ? 'wide opening' : 'door'}. Click a door to remove it. Esc to stop.` : 'Drag on empty space to draw a room. Drag a room to move it, its corner to resize. Drag a component to pin it to a spot. Click a door to remove it.'}</p>
           <div class="row">${btn(mapState.tool === 'door' ? 'Placing doors…' : '+ Door', 'map-tool', 'data-value="door"', mapState.tool === 'door' ? 'btn small primary' : 'btn small')}${btn(mapState.tool === 'wide' ? 'Placing openings…' : '+ Wide opening', 'map-tool', 'data-value="wide"', mapState.tool === 'wide' ? 'btn small primary' : 'btn small')}</div>
           <label class="field"><span>Floor name</span><input type="text" value="${esc(floor.name)}" data-map="floor-name"></label>
           <div class="row">${btn('+ Floor', 'map-add-floor')}${btn('Load traced house', 'map-load-house')}${m.floors.length > 1 && !rooms.length && !placed.length ? btn('Delete floor', 'map-del-floor', '', 'btn small danger') : ''}</div>
@@ -588,16 +632,17 @@ function map() {
           <div class="row">${btn('Delete piece', 'map-del-room', '', 'btn small danger')}</div></div></section>` : ''}
       <section class="card"><header><h2>Place components</h2><span class="more">${unplaced.length}</span></header>
         ${placingAsset ? `<div class="callout small"><p>Click on the map to place <b>${esc(placingAsset.name)}</b>.</p>${btn('Cancel', 'map-place-cancel')}</div>` : ''}
-        ${unplaced.length ? `<ul class="rows">${unplaced.map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(a.area || '')}</span></span>${btn('Place', 'map-place', `data-id="${a.id}"`)}</li>`).join('')}</ul>` : `<div class="empty">Every asset is on the map. Add more under Assets.</div>`}
+        ${unplaced.length ? `<ul class="rows">${unplaced.map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(a.area || '')}</span></span><span class="row"><select class="mini" data-map="place-room" data-id="${a.id}" aria-label="Room for ${esc(a.name)}"><option value="">Room…</option>${roomOptions('').replace(/^<option[^>]*>[^<]*<\/option>/, '')}</select>${btn('Pin', 'map-place', `data-id="${a.id}"`, 'btn small ghost')}</span></li>`).join('')}</ul>` : `<div class="empty">Every asset is on the map. Add more under Assets.</div>`}
       </section>
-      ${placed.length ? `<section class="card"><header><h2>On this floor</h2></header><ul class="rows">${placed.sort(by('name')).map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}</span>${btn('Unplace', 'map-unplace', `data-id="${a.id}"`, 'btn small ghost')}</li>`).join('')}</ul></section>` : ''}`
+      ${placed.length ? `<section class="card"><header><h2>On this floor</h2></header><ul class="rows">${placed.map(p => p.a).sort(by('name')).map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}<span class="sub">${a.map.room ? esc((assetRoom(a) || {}).name || '') : 'pinned'}</span></span>${btn('Unplace', 'map-unplace', `data-id="${a.id}"`, 'btn small ghost')}</li>`).join('')}</ul></section>` : ''}`
     : `
       <section class="card"><header><h2>Status</h2>${iso ? '<span class="more">plumbob color</span>' : ''}</header>
         <ul class="legend"><li><i class="over"></i>Overdue</li><li><i class="soon"></i>Due within 30 days</li><li><i class="todo"></i>Open to-do</li><li><i class="ok"></i>All good</li><li><i class="none"></i>Nothing scheduled</li></ul>
       </section>
       <section class="card"><header><h2>On ${esc(floor.name)}</h2><span class="more">${placed.length}</span></header>
-        ${statusRows.length ? `<ul class="rows">${statusRows.map(({ a, st }) => `<li data-hl="${a.id}"><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>`).join('')}</ul>` : `<div class="empty">Nothing placed on this floor yet. Switch to Edit to draw rooms and place components.</div>`}
-      </section>`;
+        ${statusRows.length ? `<ul class="rows">${statusRows.map(({ a, st }) => `<li data-hl="${a.id}"><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>`).join('')}</ul>` : `<div class="empty">Nothing on this floor yet. Give an asset a room (edit the asset, or Edit layout here) and it appears.</div>`}
+      </section>
+      <section class="card"><div class="map-panel"><p class="hint">Scroll or pinch to zoom, drag to pan. Click a room name to zoom into it, double-click empty ground to zoom out.</p></div></section>`;
 
   const planSvg = `<svg id="map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map">
           <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
@@ -609,28 +654,32 @@ function map() {
     ${head('Map', { eyebrow: `${new Set(m.rooms.map(r => `${r.floor}|${roomKey(r)}`)).size} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
     ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p><div class="row">${btn('Load my house', 'map-load-house', '', 'btn primary small')}${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')}</div></div>` : ''}
     <div class="map-layout">
-      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset || mapState.tool ? 'placing' : ''} ${iso ? 'iso' : ''}">
-        ${iso ? isoSvg(rooms, doors, placed, m.bg[floor.id]) : planSvg}
+      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset || mapState.tool ? 'placing' : ''} ${iso ? 'iso' : ''} ${placed.length > 10 ? 'busy' : ''}">
+        ${iso ? isoSvg(rooms, doors, placed, m.bg[floor.id], summary) : planSvg}
         <div class="map-tip" id="map-tip" hidden></div>
+        <button type="button" class="btn small map-reset" data-action="map-reset" hidden>Whole floor</button>
       </div>
       <aside class="map-side">${panel}</aside>
     </div>`;
 }
+
+// Count badge under a room name, colored by the worst status inside.
+function badge(sum, x, y, anchor = 'middle') { if (!sum) return ''; const w = sum.n > 9 ? 30 : 24; const bx = anchor === 'start' ? x : x - w / 2; return `<g class="chip ${sum.cls}"><rect x="${bx}" y="${y}" width="${w}" height="15" rx="7.5"/><text x="${bx + w / 2}" y="${y + 11}" text-anchor="middle">${sum.n}</text></g>`; }
 
 // Isometric view: the same plan coordinates projected at 30°, back walls raised, markers standing on tiles.
 const ISO_H = 72, ISO_CHUNK = 40;
 const isoP = (x, y, z = 0) => ({ X: (x - y) * 0.866, Y: (x + y) * 0.5 - z });
 const isoPts = arr => arr.map(p => `${p.X.toFixed(1)},${p.Y.toFixed(1)}`).join(' ');
 // Floors first (always behind anything raised), then walls in short chunks and markers sorted by depth, labels last.
-function isoSvg(rooms, doors, placed, bgData) {
+function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
   let gx0 = 0, gy0 = 0, gx1 = MAP_W, gy1 = MAP_H;
   if (!bgData && (rooms.length || placed.length)) {
-    const xs = [...rooms.flatMap(r => [r.x, r.x + r.w]), ...placed.map(a => a.map.x)], ys = [...rooms.flatMap(r => [r.y, r.y + r.h]), ...placed.map(a => a.map.y)];
+    const xs = [...rooms.flatMap(r => [r.x, r.x + r.w]), ...placed.map(p => p.x)], ys = [...rooms.flatMap(r => [r.y, r.y + r.h]), ...placed.map(p => p.y)];
     gx0 = Math.max(0, Math.min(...xs) - 50); gy0 = Math.max(0, Math.min(...ys) - 50); gx1 = Math.min(MAP_W, Math.max(...xs) + 50); gy1 = Math.min(MAP_H, Math.max(...ys) + 50);
   }
   const all = [isoP(gx0, gy0), isoP(gx1, gy0), isoP(gx1, gy1), isoP(gx0, gy1)];
   for (const r of rooms) all.push(isoP(r.x, r.y, ISO_H), isoP(r.x + r.w, r.y, ISO_H), isoP(r.x, r.y + r.h, ISO_H), isoP(r.x + r.w, r.y + r.h));
-  for (const a of placed) all.push(isoP(a.map.x, a.map.y, 95), isoP(a.map.x - 30, a.map.y + 30, -30), isoP(a.map.x + 30, a.map.y - 30));
+  for (const p of placed) all.push(isoP(p.x, p.y, 95), isoP(p.x - 30, p.y + 30, -30), isoP(p.x + 30, p.y - 30));
   const minX = Math.min(...all.map(p => p.X)) - 30, maxX = Math.max(...all.map(p => p.X)) + 30, minY = Math.min(...all.map(p => p.Y)) - 30, maxY = Math.max(...all.map(p => p.Y)) + 30;
 
   const groups = roomGroups(rooms); const floors = [], bases = [], ents = [], labels = [];
@@ -648,10 +697,10 @@ function isoSvg(rooms, doors, placed, bgData) {
         ents.push({ d: (p0[0] + p1[0] + p0[1] + p1[1]) / 2, k: 0, html: `<g class="${cls}" data-room="${r.id}"><polygon class="${horiz ? 'wall-t' : 'wall-l'}" points="${isoPts([A, B, BH, AH])}"/><polyline class="base" points="${isoPts([A, B])}"/><polyline class="wall-top" points="${isoPts([AH, BH])}"/>${a === lo ? post(A, AH) : ''}${b === hi ? post(B, BH) : ''}</g>` });
       }
     }
-    if (main.id === r.id) { const L = isoP(r.x + r.w / 2, r.y + 20); labels.push(`<text class="room-label" x="${L.X.toFixed(1)}" y="${L.Y.toFixed(1)}" text-anchor="middle">${esc(r.name)}</text>`); }
+    if (main.id === r.id) { const cx = r.x + r.w / 2; const onWall = roomEdges(r, group, doors).some(e => e.side === 'top' && e.x0 <= cx - 10 && e.x1 >= cx + 10); const L = onWall ? isoP(cx, r.y, ISO_H - 18) : isoP(cx, r.y + 20); labels.push(`<text class="room-label" x="${L.X.toFixed(1)}" y="${L.Y.toFixed(1)}" text-anchor="middle" data-focus="${esc(roomKey(r))}">${esc(r.name)}</text>${badge(summary.get(roomKey(r)), L.X, L.Y + 6)}`); }
   }
   for (const d of doors) { const { sill, leaf } = isoDoor(d); bases.push(sill); if (leaf) ents.push({ d: d.x + d.y, k: 0.5, html: leaf }); }
-  for (const a of placed) ents.push({ d: a.map.x + a.map.y, k: 1, html: isoMarker(a) });
+  for (const p of placed) ents.push({ d: p.x + p.y, k: 1, html: isoMarker(p) });
   ents.sort((p, q) => p.d - q.d || p.k - q.k);
   return `<svg id="map-svg" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map, isometric">
       <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
@@ -673,15 +722,15 @@ function isoDoor(d) {
   const pts = h ? [isoP(jx, jy), isoP(jx, jy + d.w), isoP(jx, jy + d.w, Hd), isoP(jx, jy, Hd)] : [isoP(jx, jy), isoP(jx + d.w, jy), isoP(jx + d.w, jy, Hd), isoP(jx, jy, Hd)];
   return { sill, leaf: `<g class="door iso" data-door="${d.id}"><polygon class="${h ? 'leaf-l' : 'leaf-t'}" points="${isoPts(pts)}"/></g>` };
 }
-function isoMarker(a) {
-  const { x, y } = a.map; const B = isoP(x, y); const st = assetStatus(a.id);
-  const tile = isoPts([isoP(x - 20, y - 20), isoP(x + 20, y - 20), isoP(x + 20, y + 20), isoP(x - 20, y + 20)]);
-  return `<g class="marker iso ${st.cls}" data-asset="${a.id}">
-      <ellipse class="shadow" cx="${B.X.toFixed(1)}" cy="${(B.Y + 3).toFixed(1)}" rx="24" ry="12"/>
+function isoMarker({ a, x, y, auto, col }) {
+  const B = isoP(x, y); const st = assetStatus(a.id);
+  const tile = isoPts([isoP(x - 22, y - 22), isoP(x + 22, y - 22), isoP(x + 22, y + 22), isoP(x - 22, y + 22)]);
+  return `<g class="marker iso ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
+      <ellipse class="shadow" cx="${B.X.toFixed(1)}" cy="${(B.Y + 3).toFixed(1)}" rx="26" ry="13"/>
       <polygon class="tile" points="${tile}"/>
-      <text class="glyph" x="${B.X.toFixed(1)}" y="${(B.Y - 4).toFixed(1)}" text-anchor="middle">${assetIcon(a)}</text>
-      <g transform="translate(${B.X.toFixed(1)},${(B.Y - 50).toFixed(1)})"><g class="plumbob"><polygon class="pb-top" points="0,-14 9,0 -9,0"/><polygon class="pb-bot" points="-9,0 9,0 0,14"/><polygon class="pb-side" points="0,-14 9,0 0,14"/></g></g>
-      <text class="mlabel" x="${B.X.toFixed(1)}" y="${(B.Y + 28).toFixed(1)}" text-anchor="middle">${esc(a.name)}</text>
+      <text class="glyph" x="${B.X.toFixed(1)}" y="${(B.Y - 2).toFixed(1)}" text-anchor="middle">${assetIcon(a)}</text>
+      <g transform="translate(${B.X.toFixed(1)},${(B.Y - 54).toFixed(1)})"><g class="plumbob"><polygon class="pb-top" points="0,-14 9,0 -9,0"/><polygon class="pb-bot" points="-9,0 9,0 0,14"/><polygon class="pb-side" points="0,-14 9,0 0,14"/></g></g>
+      <text class="mlabel" x="${B.X.toFixed(1)}" y="${(B.Y + (col % 2 ? 44 : 31)).toFixed(1)}" text-anchor="middle">${esc(shortName(a.name))}</text>
     </g>`;
 }
 
@@ -701,6 +750,7 @@ function tipHtml(id) {
 function bindMap() {
   const svg = $('#map-svg'); if (!svg) return;
   const wrap = svg.parentElement; const tip = $('#map-tip');
+  bindCamera(svg, wrap);
   const pt = e => { const r = svg.getBoundingClientRect(); return { x: (e.clientX - r.left) * MAP_W / r.width, y: (e.clientY - r.top) * MAP_H / r.height }; };
   const snap = v => Math.round(v / SNAP) * SNAP;
   const clamp = (v, max) => Math.max(0, Math.min(max, v));
@@ -745,7 +795,7 @@ function bindMap() {
     const handle = e.target.closest('[data-handle]'), marker = e.target.closest('[data-asset]'), rm = e.target.closest('[data-room]');
     e.preventDefault(); try { svg.setPointerCapture(e.pointerId); } catch {}
     if (handle) mapState.drag = { type: 'resize', id: handle.dataset.handle, start: p, orig: { ...room(handle.dataset.handle) }, el: handle.closest('g') };
-    else if (marker) mapState.drag = { type: 'asset', id: marker.dataset.asset, start: p, orig: { ...store.assets[marker.dataset.asset].map }, el: marker };
+    else if (marker) mapState.drag = { type: 'asset', id: marker.dataset.asset, start: p, orig: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) }, el: marker };
     else if (rm) { mapState.selected = rm.dataset.room; mapState.drag = { type: 'room', id: rm.dataset.room, start: p, orig: { ...room(rm.dataset.room) }, el: rm }; }
     else { const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); rect.setAttribute('class', 'drawing'); rect.setAttribute('rx', '8'); $('#scratch').append(rect); mapState.selected = null; mapState.drag = { type: 'draw', start: p, rect }; }
   });
@@ -757,7 +807,7 @@ function bindMap() {
     const m = mapData();
     if (d.type === 'room') { if (dx || dy) { const rooms = m.rooms.map(r => r.id === d.id ? { ...r, x: clamp(r.x + dx, MAP_W - r.w), y: clamp(r.y + dy, MAP_H - r.h) } : r); await saveMap({ rooms }); } else render(); }
     else if (d.type === 'resize') { const rooms = m.rooms.map(r => r.id === d.id ? { ...r, w: Math.max(40, d.orig.w + dx), h: Math.max(40, d.orig.h + dy) } : r); await saveMap({ rooms }); }
-    else if (d.type === 'asset') { const a = store.assets[d.id]; const pos = { floor: mapState.floor, x: clamp(snap(d.orig.x + dx), MAP_W), y: clamp(snap(d.orig.y + dy), MAP_H) }; if (pos.x !== a.map.x || pos.y !== a.map.y) await save('assets', { ...a, map: pos }); else render(); }
+    else if (d.type === 'asset') { const a = store.assets[d.id]; const pos = { floor: mapState.floor, x: clamp(snap(d.orig.x + dx), MAP_W), y: clamp(snap(d.orig.y + dy), MAP_H) }; if (dx || dy || a.map.room) await save('assets', { ...a, map: pos }); else render(); }
     else if (d.type === 'draw') {
       d.rect.remove();
       const x = snap(Math.min(d.start.x, p.x)), y = snap(Math.min(d.start.y, p.y)), w = Math.abs(snap(p.x) - snap(d.start.x)), h = Math.abs(snap(p.y) - snap(d.start.y));
@@ -768,11 +818,69 @@ function bindMap() {
   });
 
   svg.addEventListener('click', e => {
-    if (mapState.mode !== 'view') return;
+    if (mapState.mode !== 'view' || mapState.panned) return;
+    const f = e.target.closest('[data-focus]'); if (f) { focusRoom(svg, wrap, f.dataset.focus); return; }
     const g = e.target.closest('[data-asset]'); if (g) location.hash = `#/assets/${g.dataset.asset}`;
   });
+  svg.addEventListener('dblclick', e => { if (mapState.mode !== 'view') return; const rm = e.target.closest('[data-room]'); const r = rm && mapData().rooms.find(x => x.id === rm.dataset.room); if (r) focusRoom(svg, wrap, roomKey(r)); else setCam(svg, wrap, null); });
+  if (mapState.focus) { const k = mapState.focus; mapState.focus = null; focusRoom(svg, wrap, k, false); }
   // hovering a row in the side list lights its marker
   wrap.parentElement.addEventListener('pointerover', e => { const li = e.target.closest('[data-hl]'); svg.querySelectorAll('.marker.lit').forEach(m => m.classList.remove('lit')); if (li) { const mk = svg.querySelector(`[data-asset="${li.dataset.hl}"]`); if (mk) mk.classList.add('lit'); } });
+}
+
+// ---- camera: the SVG viewBox is the camera. Zoom around the cursor (wheel or pinch), drag to pan, click a room name to frame it.
+const vbOf = svg => { const v = svg.viewBox.baseVal; return { x: v.x, y: v.y, w: v.width, h: v.height }; };
+function setCam(svg, wrap, cam, animate = true) {
+  const base = mapState.base;
+  if (cam) { // keep the zoom between 1x and 8x and the view over the floor
+    const w = Math.min(base.w, Math.max(base.w / 8, cam.w)), h = w * base.h / base.w;
+    cam = { x: Math.min(Math.max(cam.x, base.x - w * 0.25), base.x + base.w - w * 0.75), y: Math.min(Math.max(cam.y, base.y - h * 0.25), base.y + base.h - h * 0.75), w, h };
+    if (w >= base.w - 0.5) cam = null;
+  }
+  const target = cam || base; const from = vbOf(svg);
+  mapState.cam = cam ? { ...cam, floor: mapState.floor, view: mapState.view } : null;
+  wrap.classList.toggle('zoomed', !!cam && base.w / target.w >= 1.8);
+  wrap.querySelector('.map-reset').hidden = !cam;
+  const apply = v => svg.setAttribute('viewBox', `${v.x.toFixed(1)} ${v.y.toFixed(1)} ${v.w.toFixed(1)} ${v.h.toFixed(1)}`);
+  if (!animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(target); return; }
+  const t0 = performance.now(); cancelAnimationFrame(mapState.anim);
+  const step = now => { const t = Math.min(1, (now - t0) / 240), e = 1 - Math.pow(1 - t, 3); apply({ x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e, w: from.w + (target.w - from.w) * e, h: from.h + (target.h - from.h) * e }); if (t < 1) mapState.anim = requestAnimationFrame(step); };
+  mapState.anim = requestAnimationFrame(step);
+}
+function focusRoom(svg, wrap, key, animate = true) {
+  const pieces = mapData().rooms.filter(r => r.floor === mapState.floor && roomKey(r) === key); if (!pieces.length) return;
+  const pts = [];
+  for (const r of pieces) { const cs = [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]; for (const [x, y] of cs) { if (mapState.view === 'iso') { pts.push(isoP(x, y)); pts.push(isoP(x, y, ISO_H)); } else pts.push({ X: x, Y: y }); } }
+  const x0 = Math.min(...pts.map(p => p.X)) - 40, x1 = Math.max(...pts.map(p => p.X)) + 40, y0 = Math.min(...pts.map(p => p.Y)) - 30, y1 = Math.max(...pts.map(p => p.Y)) + 50;
+  const base = mapState.base; let w = x1 - x0, h = y1 - y0;
+  if (w / h < base.w / base.h) w = h * base.w / base.h; else h = w * base.h / base.w;
+  setCam(svg, wrap, { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h }, animate);
+}
+function bindCamera(svg, wrap) {
+  mapState.base = vbOf(svg);
+  const cam = mapState.cam; if (cam && cam.floor === mapState.floor && cam.view === mapState.view && mapState.mode === 'view') setCam(svg, wrap, cam, false); else { mapState.cam = null; wrap.querySelector('.map-reset').hidden = true; }
+  const unit = () => { const r = svg.getBoundingClientRect(); return vbOf(svg).w / r.width; }; // svg units per screen pixel
+  const zoomAt = (clientX, clientY, factor) => { const r = svg.getBoundingClientRect(); const v = vbOf(svg); const px = (clientX - r.left) / r.width, py = (clientY - r.top) / r.height; const w = v.w / factor, h = v.h / factor; setCam(svg, wrap, { x: v.x + (v.w - w) * px, y: v.y + (v.h - h) * py, w, h }, false); };
+  svg.addEventListener('wheel', e => { if (mapState.mode !== 'view') return; e.preventDefault(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0016)); }, { passive: false });
+  const pointers = new Map(); let pan = null, pinch = null;
+  svg.addEventListener('pointerdown', e => {
+    if (mapState.mode !== 'view' || e.button !== 0) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch {}
+    mapState.panned = false;
+    if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) }; pan = null; }
+    else pan = { x: e.clientX, y: e.clientY, v: vbOf(svg) };
+  });
+  svg.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (d > 0 && pinch.d > 0) zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinch.d); pinch.d = d; mapState.panned = true; return; }
+    if (!pan) return;
+    const dx = e.clientX - pan.x, dy = e.clientY - pan.y; if (!mapState.panned && Math.hypot(dx, dy) < 4) return;
+    mapState.panned = true; wrap.classList.add('panning'); const u = unit();
+    if (mapState.cam || vbOf(svg).w < mapState.base.w) setCam(svg, wrap, { x: pan.v.x - dx * u, y: pan.v.y - dy * u, w: pan.v.w, h: pan.v.h }, false);
+  });
+  const end = e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size) { pan = null; wrap.classList.remove('panning'); setTimeout(() => { mapState.panned = false; }, 0); } };
+  svg.addEventListener('pointerup', end); svg.addEventListener('pointercancel', end);
 }
 
 // Put a door on the nearest wall to the click, centered on the click and kept inside that stretch of wall.
@@ -808,11 +916,12 @@ async function mapBackground(file) {
 document.addEventListener('click', async e => {
   const el = e.target.closest('[data-action^="map-"]'); if (!el) return;
   const a = el.dataset.action; const m = mapData();
-  if (a === 'map-mode') { mapState.mode = el.dataset.value; mapState.selected = null; mapState.placing = null; mapState.tool = null; render(); }
+  if (a === 'map-mode') { mapState.mode = el.dataset.value; mapState.selected = null; mapState.placing = null; mapState.tool = null; mapState.cam = null; render(); }
+  else if (a === 'map-reset') { setCam($('#map-svg'), el.parentElement, null); }
   else if (a === 'map-tool') { mapState.tool = mapState.tool === el.dataset.value ? null : el.dataset.value; mapState.placing = null; render(); }
-  else if (a === 'map-view') { mapState.view = el.dataset.value; try { localStorage.setItem('hb.mapview', mapState.view); } catch {} render(); }
-  else if (a === 'map-floor') { mapState.floor = el.dataset.id; mapState.selected = null; render(); }
-  else if (a === 'map-goto') { mapState.floor = el.dataset.floor; mapState.mode = 'view'; }
+  else if (a === 'map-view') { mapState.view = el.dataset.value; mapState.cam = null; try { localStorage.setItem('hb.mapview', mapState.view); } catch {} render(); }
+  else if (a === 'map-floor') { mapState.floor = el.dataset.id; mapState.selected = null; mapState.cam = null; render(); }
+  else if (a === 'map-goto') { mapState.floor = el.dataset.floor; mapState.mode = 'view'; mapState.cam = null; mapState.focus = el.dataset.focus || null; }
   else if (a === 'map-add-floor') { const f = { id: uid(), name: `Floor ${m.floors.length + 1}` }; mapState.floor = f.id; saveMap({ floors: [...m.floors, f] }); const inp = $('[data-map="floor-name"]'); if (inp) { inp.focus(); inp.select(); } }
   else if (a === 'map-del-floor') { if (m.floors.length > 1 && confirm(`Delete ${floorName(mapState.floor)}?`)) { const bg = { ...m.bg }; delete bg[mapState.floor]; const floors = m.floors.filter(f => f.id !== mapState.floor); const doors = m.doors.filter(d => d.floor !== mapState.floor); mapState.floor = floors[0].id; await saveMap({ floors, bg, doors }); } }
   else if (a === 'map-del-room') { if (confirm('Delete this piece of the layout? Components stay where they are.')) { const id = mapState.selected; mapState.selected = null; await saveMap({ rooms: m.rooms.filter(r => r.id !== id) }); } }
@@ -827,7 +936,10 @@ document.addEventListener('change', async e => {
   const t = e.target;
   if (t.dataset.action === 'map-bg' && t.files[0]) { mapBackground(t.files[0]).catch(() => toast("Couldn't read that image.", true)); return; }
   if (t.dataset.map === 'floor-name') { const v = t.value.trim(); if (v) await saveMap({ floors: mapData().floors.map(f => f.id === mapState.floor ? { ...f, name: v } : f) }); }
-  if (t.dataset.map === 'room-name') { const v = t.value.trim(); if (v) { const m = mapData(); const cur = m.rooms.find(r => r.id === mapState.selected); const twin = cur && m.rooms.find(r => r.id !== cur.id && r.floor === cur.floor && roomKey(r) === v.toLowerCase()); await saveMap({ rooms: m.rooms.map(r => r.id === mapState.selected ? { ...r, name: v, color: twin ? (twin.color ?? 0) : r.color } : r) }); } }
+  if (t.dataset.map === 'room-name') { const v = t.value.trim(); if (v) { const m = mapData(); const cur = m.rooms.find(r => r.id === mapState.selected); const twin = cur && m.rooms.find(r => r.id !== cur.id && r.floor === cur.floor && roomKey(r) === v.toLowerCase()); const oldKey = cur && roomKey(cur); await saveMap({ rooms: m.rooms.map(r => r.id === mapState.selected ? { ...r, name: v, color: twin ? (twin.color ?? 0) : r.color } : r) });
+    // the last piece with the old name takes its room-assigned components along
+    if (cur && !mapData().rooms.some(r => r.floor === cur.floor && roomKey(r) === oldKey)) for (const a of list('assets')) if (a.map && a.map.room === oldKey && a.map.floor === cur.floor) await save('assets', { ...a, map: { floor: cur.floor, room: v.toLowerCase() } }); } }
+  if (t.dataset.map === 'place-room') { const a = store.assets[t.dataset.id]; const v = t.value; if (a && v) { const [floor, ...rest] = v.split('|'); await save('assets', { ...a, map: { floor, room: rest.join('|') } }); toast(`${a.name} placed`); } }
 });
 document.addEventListener('keydown', e => {
   if (state.route.view === 'map' && mapState.mode === 'edit' && (e.key === 'Delete' || e.key === 'Backspace') && mapState.selected && !/input|textarea/i.test(e.target.tagName)) {
@@ -848,6 +960,7 @@ function openEditor(coll, data = {}, presets = {}) {
     let input;
     if (f.t === 'select') input = `<select id="${id}" name="${f.k}">${f.opts.map(o => `<option value="${esc(o)}" ${String(v) === String(o) ? 'selected' : ''}>${esc(o) || '—'}</option>`).join('')}</select>`;
     else if (f.t === 'asset') { const opts = list('assets').sort(by('name')); input = `<select id="${id}" name="${f.k}"><option value="">— none —</option>${opts.map(a => `<option value="${a.id}" ${v === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`; }
+    else if (f.t === 'room') { const cur = roomValue(data); input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${roomOptions(cur)}</select>`; }
     else if (f.t === 'md') input = `<textarea id="${id}" name="${f.k}" spellcheck="true">${esc(v)}</textarea>`;
     else input = `<input id="${id}" name="${f.k}" type="${f.t === 'md' ? 'text' : f.t}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} ${f.t === 'number' ? 'step="any" inputmode="decimal"' : ''}>`;
     return `<div class="field ${f.wide ? 'wide' : ''}"><label for="${id}">${esc(f.l)}</label>${input}</div>`;
@@ -866,6 +979,7 @@ $('#editor-form').addEventListener('submit', async e => {
   const out = { ...(dlg._base || {}) };
   for (const f of s.fields) {
     const el = $(`#f-${f.k}`); let v = el.value;
+    if (f.t === 'room') { if (v !== el.dataset.initial) { const [floor, ...rest] = v.split('|'); out.map = v ? { floor, room: rest.join('|') } : null; } continue; }
     if (f.t === 'number') v = v === '' ? null : Number(v);
     if (f.req && (v === '' || v == null)) { el.focus(); return; }
     out[f.k] = v === '' ? null : v;

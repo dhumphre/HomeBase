@@ -104,28 +104,22 @@ export async function addSchedule({ task, asset, every, unit, nextDue, lastDone,
 }
 
 export async function layout() { await init(); return (await mapRef().get()).data() || { floors: [{ id: 'main', name: 'Main floor' }], rooms: [], doors: [] }; }
-export function roomSpot(rooms, name, slot = 0) {
-  const rs = rooms.filter(r => String(r.name || '').toLowerCase() === String(name).toLowerCase()); if (!rs.length) return null;
-  const r = rs.sort((a, b) => b.w * b.h - a.w * a.h)[0]; const snap = v => Math.round(v / 10) * 10;
-  const fx = [0.5, 0.3, 0.7, 0.5, 0.3, 0.7][slot % 6], fy = [0.5, 0.35, 0.35, 0.75, 0.7, 0.7][slot % 6];
-  return { floor: r.floor, x: snap(r.x + r.w * fx), y: snap(r.y + r.h * fy) };
-}
+// Components are assigned to a room by name (map:{floor, room}); the site lays them out inside it. Hand-pinned ones carry x,y instead.
+export function roomRef(rooms, name) { const key = String(name || '').trim().toLowerCase(); const r = rooms.find(r => String(r.name || '').trim().toLowerCase() === key); return r ? { floor: r.floor, room: key } : null; }
 export async function addAsset({ name, area, type, make, serial, year, purchased, specs, contact, manual, notes, room }) {
   let map = null, placedIn = null;
-  if (room) { const m = await layout(); const here = (await all('assets')).filter(a => a.map).length; map = roomSpot(m.rooms || [], room, here); placedIn = map ? room : null; }
+  if (room) { const m = await layout(); map = roomRef(m.rooms || [], room); placedIn = map ? room : null; }
   const doc = await create('assets', { name, area: area || 'House', type: type || null, make: make || null, serial: serial || null, year: num(year), purchased: purchased || null, specs: specs || null, contact: contact || null, manual: manual || null, notes: notes || '', map });
   return { ...doc, placedIn };
 }
 export async function place(assetQ, room) {
   const a = await find('assets', assetQ); const m = await layout();
-  const taken = (await all('assets')).filter(x => x.map && x.id !== a.id).map(x => `${x.map.x},${x.map.y}`);
-  let spot = null; for (let i = 0; i < 6 && !spot; i++) { const s = roomSpot(m.rooms || [], room, i); if (!s) break; if (!taken.includes(`${s.x},${s.y}`)) spot = s; }
-  if (!spot) throw new Error(`No room named "${room}" on the map.`);
-  await merge('assets', a.id, { map: spot }); return { asset: a.name, room, ...spot };
+  const ref = roomRef(m.rooms || [], room); if (!ref) throw new Error(`No room named "${room}" on the map. Rooms: ${[...new Set((m.rooms || []).map(r => r.name))].join(', ')}`);
+  await coll('assets').doc(a.id).update({ map: ref, updated: Date.now() }); return { asset: a.name, room, floor: ref.floor }; // update() replaces the map field; set-merge would keep old x,y
 }
 export async function mapSummary() {
   const m = await layout(); const assets = await all('assets'); const floors = m.floors || [{ id: 'main', name: 'Main floor' }];
-  return { floors: floors.map(f => ({ ...f, rooms: (m.rooms || []).filter(r => r.floor === f.id).map(r => ({ id: r.id, name: r.name, x: r.x, y: r.y, w: r.w, h: r.h, color: r.color ?? 0 })), doors: (m.doors || []).filter(d => d.floor === f.id), assets: assets.filter(a => a.map && a.map.floor === f.id).map(a => ({ id: a.id, name: a.name, x: a.map.x, y: a.map.y })) })), unplaced: assets.filter(a => !a.map).map(a => a.name) };
+  return { floors: floors.map(f => ({ ...f, rooms: (m.rooms || []).filter(r => r.floor === f.id).map(r => ({ id: r.id, name: r.name, x: r.x, y: r.y, w: r.w, h: r.h, color: r.color ?? 0 })), doors: (m.doors || []).filter(d => d.floor === f.id), assets: assets.filter(a => a.map && a.map.floor === f.id).map(a => ({ id: a.id, name: a.name, room: a.map.room || ((m.rooms || []).find(r => r.floor === f.id && a.map.x >= r.x && a.map.x <= r.x + r.w && a.map.y >= r.y && a.map.y <= r.y + r.h) || {}).name || null, pinned: a.map.x != null ? [a.map.x, a.map.y] : null })) })), unplaced: assets.filter(a => !a.map).map(a => a.name) };
 }
 export async function dump() { const out = {}; for (const c of COLLS) out[c] = await all(c); out.map = await layout(); return out; }
 
