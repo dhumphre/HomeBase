@@ -1,2 +1,6 @@
 .claude/
 tools/node_modules/
+remote/node_modules/
+remote/.wrangler/
+remote/.dev.vars
+remote/worker-configuration.d.ts

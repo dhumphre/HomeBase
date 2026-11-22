@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "homebase-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "account_id": "6b03e266bcb3e0067f2ce54767415449",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "vars": {
+    // The URL MCP clients connect to; every token is bound to it.
+    "MCP_RESOURCE": "https://homebase-mcp.dhumphre.workers.dev/mcp",
+    "FIREBASE_PROJECT": "trailhead-almanac",
+    // "Today" for log entries and due dates, as the household sees it.
+    "HOUSEHOLD_TZ": "America/Los_Angeles"
+  },
+  // Secrets (npx wrangler secret put <NAME>): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, FIREBASE_SERVICE_ACCOUNT
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "f17196e96e8547dba18dfd2b8a7c6153" }]
+}
