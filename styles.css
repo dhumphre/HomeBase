@@ -304,6 +304,36 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .callout.small { margin: 12px 16px; padding: 10px 12px; font-size: 13.5px; }
 @media (max-width: 900px) { .map-layout { grid-template-columns: 1fr; } }
 
+/* isometric */
+.map-wrap.iso { background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--surface) 70%, var(--accent-soft)), var(--surface) 70%); }
+.map-wrap.iso .room .floor { stroke: none; }
+.map-wrap.iso .room .wall-t, .map-wrap.iso .room .wall-l { stroke: var(--wall); stroke-width: 1.5; stroke-linejoin: round; }
+.map-wrap.iso .room .wall-t { fill: color-mix(in srgb, var(--room-0) 72%, #fff); }
+.map-wrap.iso .room .wall-l { fill: color-mix(in srgb, var(--room-0) 70%, #000); }
+.map-wrap.iso .room.t1 .wall-t { fill: color-mix(in srgb, var(--room-1) 72%, #fff); } .map-wrap.iso .room.t1 .wall-l { fill: color-mix(in srgb, var(--room-1) 70%, #000); }
+.map-wrap.iso .room.t2 .wall-t { fill: color-mix(in srgb, var(--room-2) 72%, #fff); } .map-wrap.iso .room.t2 .wall-l { fill: color-mix(in srgb, var(--room-2) 70%, #000); }
+.map-wrap.iso .room.t3 .wall-t { fill: color-mix(in srgb, var(--room-3) 72%, #fff); } .map-wrap.iso .room.t3 .wall-l { fill: color-mix(in srgb, var(--room-3) 70%, #000); }
+.map-wrap.iso .room.t4 .wall-t { fill: color-mix(in srgb, var(--room-4) 72%, #fff); } .map-wrap.iso .room.t4 .wall-l { fill: color-mix(in srgb, var(--room-4) 70%, #000); }
+.map-wrap.iso .room.t5 .wall-t { fill: color-mix(in srgb, var(--room-5) 72%, #fff); } .map-wrap.iso .room.t5 .wall-l { fill: color-mix(in srgb, var(--room-5) 70%, #000); }
+.map-wrap.iso .room .wall-top { fill: none; stroke: var(--wall); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
+.map-wrap.iso .room .base { fill: none; stroke: rgba(0,0,0,.18); stroke-width: 2; }
+.map-wrap.iso .room-label { font-size: 14px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.marker.iso .shadow { fill: rgba(0,0,0,.22); }
+.marker.iso .tile { fill: var(--surface); stroke: var(--ink-3); stroke-width: 2.5; stroke-linejoin: round; }
+.marker.iso.ok .tile { stroke: var(--accent); } .marker.iso.soon .tile { stroke: var(--amber); } .marker.iso.over .tile { stroke: var(--danger); } .marker.iso.todo .tile { stroke: var(--purple-ink); }
+.marker.iso .glyph { font-size: 24px; }
+.marker.iso:hover .tile, .marker.iso.lit .tile { stroke-width: 4; }
+.plumbob { animation: bob 2.2s ease-in-out infinite; }
+.marker.iso.over .plumbob { animation-duration: 1s; }
+.plumbob .pb-top { fill: var(--ink-3); } .plumbob .pb-bot { fill: var(--ink-3); } .plumbob .pb-side { fill: rgba(0,0,0,.22); }
+.marker.iso.ok .pb-top, .marker.iso.ok .pb-bot { fill: var(--accent); }
+.marker.iso.soon .pb-top, .marker.iso.soon .pb-bot { fill: var(--amber); }
+.marker.iso.over .pb-top, .marker.iso.over .pb-bot { fill: var(--danger); }
+.marker.iso.todo .pb-top, .marker.iso.todo .pb-bot { fill: var(--purple-ink); }
+.plumbob .pb-top { filter: brightness(1.25); }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@media (prefers-reduced-motion: reduce) { .plumbob, .marker.over .halo { animation: none; } }
+
 /* ---------- toast ---------- */
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; box-shadow: var(--shadow); max-width: calc(100vw - 32px); }
 .toast.error { background: var(--danger); color: #fff; }

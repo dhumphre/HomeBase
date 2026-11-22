@@ -451,7 +451,8 @@ function settings() {
 // ---------------------------------------------------------------- map
 // Rooms live in one document (map/layout); each asset carries its own map position {floor, x, y}.
 const MAP_W = 1000, MAP_H = 640, SNAP = 10;
-const mapState = { floor: null, mode: 'view', selected: null, placing: null, drag: null, pendingRender: false, hover: null };
+const mapState = { floor: null, mode: 'view', view: 'iso', selected: null, placing: null, drag: null, pendingRender: false, hover: null };
+try { const v = localStorage.getItem('hb.mapview'); if (v === 'plan' || v === 'iso') mapState.view = v; } catch {}
 function mapData() {
   const m = store.map || {};
   return { floors: m.floors && m.floors.length ? m.floors : [{ id: 'main', name: 'Main floor' }], rooms: m.rooms || [], bg: m.bg || {} };
@@ -500,8 +501,10 @@ function map() {
       <text class="mlabel" y="36" text-anchor="middle">${esc(a.name)}</text>
     </g>`; }).join('');
   const bg = m.bg[floor.id] ? `<image href="${m.bg[floor.id]}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : '';
+  const iso = !edit && mapState.view === 'iso';
 
   const floorTabs = `<div class="seg">${m.floors.map(f => `<button type="button" aria-pressed="${f.id === floor.id}" data-action="map-floor" data-id="${f.id}">${esc(f.name)}</button>`).join('')}</div>`;
+  const viewTabs = edit ? '' : `<div class="seg"><button type="button" aria-pressed="${iso}" data-action="map-view" data-value="iso">3D</button><button type="button" aria-pressed="${!iso}" data-action="map-view" data-value="plan">Plan</button></div>`;
   const statusRows = placed.map(a => ({ a, st: assetStatus(a.id) })).sort((x, y) => ['over', 'soon', 'todo', 'ok', 'none'].indexOf(x.st.cls) - ['over', 'soon', 'todo', 'ok', 'none'].indexOf(y.st.cls));
 
   const panel = edit ? `
@@ -523,27 +526,79 @@ function map() {
       </section>
       ${placed.length ? `<section class="card"><header><h2>On this floor</h2></header><ul class="rows">${placed.sort(by('name')).map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}</span>${btn('Unplace', 'map-unplace', `data-id="${a.id}"`, 'btn small ghost')}</li>`).join('')}</ul></section>` : ''}`
     : `
-      <section class="card"><header><h2>Status</h2></header>
+      <section class="card"><header><h2>Status</h2>${iso ? '<span class="more">plumbob color</span>' : ''}</header>
         <ul class="legend"><li><i class="over"></i>Overdue</li><li><i class="soon"></i>Due within 30 days</li><li><i class="todo"></i>Open to-do</li><li><i class="ok"></i>All good</li><li><i class="none"></i>Nothing scheduled</li></ul>
       </section>
       <section class="card"><header><h2>On ${esc(floor.name)}</h2><span class="more">${placed.length}</span></header>
         ${statusRows.length ? `<ul class="rows">${statusRows.map(({ a, st }) => `<li data-hl="${a.id}"><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>`).join('')}</ul>` : `<div class="empty">Nothing placed on this floor yet. Switch to Edit to draw rooms and place components.</div>`}
       </section>`;
 
-  return `
-    ${head('Map', { eyebrow: `${m.rooms.length} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
-    ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p>${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn primary small')}</div>` : ''}
-    <div class="map-layout">
-      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset ? 'placing' : ''}">
-        <svg id="map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map">
+  const planSvg = `<svg id="map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map">
           <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
           <rect width="${MAP_W}" height="${MAP_H}" class="ground"/>${bg}<rect width="${MAP_W}" height="${MAP_H}" fill="url(#grid)" class="gridfill"/>
           <g id="rooms">${roomsSvg}</g><g id="markers">${markersSvg}</g><g id="scratch"></g>
-        </svg>
+        </svg>`;
+
+  return `
+    ${head('Map', { eyebrow: `${m.rooms.length} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
+    ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p>${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn primary small')}</div>` : ''}
+    <div class="map-layout">
+      <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset ? 'placing' : ''} ${iso ? 'iso' : ''}">
+        ${iso ? isoSvg(rooms, placed, m.bg[floor.id]) : planSvg}
         <div class="map-tip" id="map-tip" hidden></div>
       </div>
       <aside class="map-side">${panel}</aside>
     </div>`;
+}
+
+// Isometric view: the same plan coordinates projected at 30°, back walls raised, markers standing on tiles.
+const ISO_H = 72;
+const isoP = (x, y, z = 0) => ({ X: (x - y) * 0.866, Y: (x + y) * 0.5 - z });
+const isoPts = arr => arr.map(p => `${p.X.toFixed(1)},${p.Y.toFixed(1)}`).join(' ');
+function isoSvg(rooms, placed, bgData) {
+  let gx0 = 0, gy0 = 0, gx1 = MAP_W, gy1 = MAP_H;
+  if (!bgData && (rooms.length || placed.length)) {
+    const xs = [...rooms.flatMap(r => [r.x, r.x + r.w]), ...placed.map(a => a.map.x)], ys = [...rooms.flatMap(r => [r.y, r.y + r.h]), ...placed.map(a => a.map.y)];
+    gx0 = Math.max(0, Math.min(...xs) - 50); gy0 = Math.max(0, Math.min(...ys) - 50); gx1 = Math.min(MAP_W, Math.max(...xs) + 50); gy1 = Math.min(MAP_H, Math.max(...ys) + 50);
+  }
+  const all = [isoP(gx0, gy0), isoP(gx1, gy0), isoP(gx1, gy1), isoP(gx0, gy1)];
+  for (const r of rooms) all.push(isoP(r.x, r.y, ISO_H), isoP(r.x + r.w, r.y, ISO_H), isoP(r.x, r.y + r.h, ISO_H), isoP(r.x + r.w, r.y + r.h));
+  for (const a of placed) all.push(isoP(a.map.x, a.map.y, 95), isoP(a.map.x - 30, a.map.y + 30, -30), isoP(a.map.x + 30, a.map.y - 30));
+  const minX = Math.min(...all.map(p => p.X)) - 30, maxX = Math.max(...all.map(p => p.X)) + 30, minY = Math.min(...all.map(p => p.Y)) - 30, maxY = Math.max(...all.map(p => p.Y)) + 30;
+  const ents = [...rooms.map(r => ({ d: r.x + r.y, html: isoRoom(r) })), ...placed.map(a => ({ d: a.map.x + a.map.y + 1, html: isoMarker(a) }))].sort((p, q) => p.d - q.d);
+  return `<svg id="map-svg" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map, isometric">
+      <defs><pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern></defs>
+      <g transform="matrix(0.866,0.5,-0.866,0.5,0,0)">
+        <rect class="ground" x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" rx="12"/>
+        ${bgData ? `<image href="${bgData}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : ''}
+        <rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" rx="12" fill="url(#grid)" class="gridfill"/>
+      </g>
+      ${ents.map(e => e.html).join('')}
+    </svg>`;
+}
+function isoRoom(r) {
+  const tl = isoP(r.x, r.y), tr = isoP(r.x + r.w, r.y), bl = isoP(r.x, r.y + r.h), br = isoP(r.x + r.w, r.y + r.h);
+  const tlH = isoP(r.x, r.y, ISO_H), trH = isoP(r.x + r.w, r.y, ISO_H), blH = isoP(r.x, r.y + r.h, ISO_H);
+  const label = isoP(r.x + r.w / 2, r.y + 20);
+  return `<g class="room t${r.color ?? 0}" data-room="${r.id}">
+      <polygon class="floor" points="${isoPts([tl, tr, br, bl])}"/>
+      <polygon class="wall-l" points="${isoPts([tl, bl, blH, tlH])}"/>
+      <polygon class="wall-t" points="${isoPts([tl, tr, trH, tlH])}"/>
+      <polyline class="wall-top" points="${isoPts([blH, tlH, trH])}"/>
+      <polyline class="base" points="${isoPts([bl, tl, tr])}"/>
+      <text class="room-label" x="${label.X.toFixed(1)}" y="${label.Y.toFixed(1)}" text-anchor="middle">${esc(r.name)}</text>
+    </g>`;
+}
+function isoMarker(a) {
+  const { x, y } = a.map; const B = isoP(x, y); const st = assetStatus(a.id);
+  const tile = isoPts([isoP(x - 20, y - 20), isoP(x + 20, y - 20), isoP(x + 20, y + 20), isoP(x - 20, y + 20)]);
+  return `<g class="marker iso ${st.cls}" data-asset="${a.id}">
+      <ellipse class="shadow" cx="${B.X.toFixed(1)}" cy="${(B.Y + 3).toFixed(1)}" rx="24" ry="12"/>
+      <polygon class="tile" points="${tile}"/>
+      <text class="glyph" x="${B.X.toFixed(1)}" y="${(B.Y - 4).toFixed(1)}" text-anchor="middle">${assetIcon(a)}</text>
+      <g transform="translate(${B.X.toFixed(1)},${(B.Y - 50).toFixed(1)})"><g class="plumbob"><polygon class="pb-top" points="0,-14 9,0 -9,0"/><polygon class="pb-bot" points="-9,0 9,0 0,14"/><polygon class="pb-side" points="0,-14 9,0 0,14"/></g></g>
+      <text class="mlabel" x="${B.X.toFixed(1)}" y="${(B.Y + 28).toFixed(1)}" text-anchor="middle">${esc(a.name)}</text>
+    </g>`;
 }
 
 function tipHtml(id) {
@@ -650,6 +705,7 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-action^="map-"]'); if (!el) return;
   const a = el.dataset.action; const m = mapData();
   if (a === 'map-mode') { mapState.mode = el.dataset.value; mapState.selected = null; mapState.placing = null; render(); }
+  else if (a === 'map-view') { mapState.view = el.dataset.value; try { localStorage.setItem('hb.mapview', mapState.view); } catch {} render(); }
   else if (a === 'map-floor') { mapState.floor = el.dataset.id; mapState.selected = null; render(); }
   else if (a === 'map-goto') { mapState.floor = el.dataset.floor; mapState.mode = 'view'; }
   else if (a === 'map-add-floor') { const f = { id: uid(), name: `Floor ${m.floors.length + 1}` }; mapState.floor = f.id; saveMap({ floors: [...m.floors, f] }); const inp = $('[data-map="floor-name"]'); if (inp) { inp.focus(); inp.select(); } }
