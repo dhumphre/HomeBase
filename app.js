@@ -19,7 +19,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).replace(/-/g, '').slice(0, 20);
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-const parseDate = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const parseDate = s => { if (!s) return null; const [y, m, d] = String(s).split('-').map(Number); const dt = new Date(y, m - 1, d); return isNaN(dt) || !(y >= 1000) ? null : dt; };
 const fmtDate = s => { const d = parseDate(s); return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) : ''; };
 const daysUntil = s => { const d = parseDate(s); if (!d) return null; const t = parseDate(today()); return Math.round((d - t) / 86400000); };
 const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -388,7 +388,7 @@ function assetDetail(id) {
   const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
   const room = assetRoom(a); const host = a.parent ? store.assets[a.parent] : null; const inside = parts(id); const carrier = hostOf(a); const carrierRoom = carrier && assetRoom(carrier);
-  const props = [['Area', chip(a.area)], ['Installed in', host ? `<a href="#/assets/${host.id}">${esc(host.name)}</a>` : ''], ['Contains', inside.length ? inside.map(c => `<a href="#/assets/${c.id}">${esc(c.name)}</a>`).join(', ') : ''], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Age', (() => { const age = ageOf(a), lf = lifespan(a); return age ? `${age.years} yr${age.years === 1 ? '' : 's'} · ${esc(age.since)}${lf ? `${lifeBar(lf)}<span class="sub">${esc(lf.text)}</span>` : ''}` : ''; })()], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">${/\.pdf(\?|$)/i.test(a.manual) ? 'PDF' : 'open'} ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : carrier ? `<a href="#/map" data-action="map-goto" data-floor="${esc(carrier.map.floor)}" data-focus="${esc(carrierRoom ? roomKey(carrierRoom) : '')}">with ${esc(carrier.name)}${carrierRoom ? ` in ${esc(carrierRoom.name)}` : ''}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
+  const props = [['Area', chip(a.area)], ['Installed in', host ? `<a href="#/assets/${host.id}">${esc(host.name)}</a>` : ''], ['Contains', inside.length ? inside.map(c => `<a href="#/assets/${c.id}">${esc(c.name)}</a>`).join(', ') : ''], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Age', (() => { const age = ageOf(a), lf = lifespan(a); return age ? `${ageText(age)} · ${esc(age.since)}${lf ? `${lifeBar(lf)}<span class="sub">${esc(lf.text)}</span>` : ''}` : ''; })()], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">${/\.pdf(\?|$)/i.test(a.manual) ? 'PDF' : 'open'} ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : carrier ? `<a href="#/map" data-action="map-goto" data-floor="${esc(carrier.map.floor)}" data-focus="${esc(carrierRoom ? roomKey(carrierRoom) : '')}">with ${esc(carrier.name)}${carrierRoom ? ` in ${esc(carrierRoom.name)}` : ''}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
   return `
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
@@ -407,23 +407,24 @@ function assetDetail(id) {
 
 // Typical service life in years by kind of thing (appliance-industry and insurer tables); an asset's own 'life' field overrides it.
 const LIFE = [
-  [/fridge|refrigerator|freezer/i, 13], [/dishwasher/i, 10], [/washer|washing/i, 11], [/dryer/i, 13], [/range|oven|stove|cooktop/i, 14], [/microwave/i, 9],
+  [/fridge|refrigerator|freezer/i, 13], [/dishwasher/i, 10], [/washer|washing/i, 11], [/dryer/i, 13], [/microwave/i, 9], [/toaster/i, 7], [/\brange\b|oven|stove|cooktop/i, 14],
   [/\btv\b|television|oled|qled/i, 8], [/receiver|amplifier|soundbar/i, 12], [/speaker|subwoofer/i, 20],
   [/water heater/i, 11], [/furnace|boiler/i, 18], [/heat pump|air cond|condenser|mini.?split|\bac\b/i, 15], [/surge protector/i, 7], [/panel|breaker/i, 30],
   [/garage door/i, 12], [/roof/i, 22], [/mower|tractor|snow ?blower/i, 10], [/generator/i, 20], [/router|wifi|modem/i, 5], [/thermostat/i, 10],
   [/crosstrek|outback|forester|legacy|subaru|\bcar\b|sedan|suv|truck|crossover/i, 15]];
 function lifespan(a) {
-  const t = `${a.name} ${a.type || ''} ${a.make || ''}`; const years = a.life != null && a.life !== '' ? Number(a.life) : (LIFE.find(([re]) => re.test(t)) || [])[1];
+  const t = `${a.name} ${a.type || ''} ${a.make || ''} ${a.area || ''}`; const years = a.life != null && a.life !== '' ? Number(a.life) : (LIFE.find(([re]) => re.test(t)) || [])[1];
   const age = ageOf(a); if (!years || !age) return null;
   const pct = age.days / (years * 365.25);
   return { years, age, pct, text: pct >= 1 ? `past its typical ${years}-year life` : `${age.years} of ~${years} typical years` };
 }
 const lifeBar = lf => lf ? `<span class="ibar life ${lf.pct >= .8 ? 'soon' : ''}"><i style="width:${Math.min(100, lf.pct * 100).toFixed(0)}%"></i></span>` : '';
-const lifeLine = a => { const lf = lifespan(a); return lf ? `<div class="tip-line">${lf.pct >= 1 ? `${lf.age.years} yrs old, past its typical ${lf.years}-year life` : `${lf.age.years} yrs old · typical life ~${lf.years} yrs`}</div>` : ''; };
+const yrs = n => `${n} yr${n === 1 ? '' : 's'}`; const ageText = age => age.years < 1 ? 'under a year' : yrs(age.years);
+const lifeLine = a => { const lf = lifespan(a); return lf ? `<div class="tip-line">${lf.pct >= 1 ? `${ageText(lf.age)} old, past its typical ${lf.years}-year life` : `${ageText(lf.age)} old · typical life ~${yrs(lf.years)}`}</div>` : ''; };
 // A car's dashboard: the odometer (with a one-line update), what is next, a year of spending and its age.
 function ageOf(a) {
-  const from = a.purchased || (a.year ? `${a.year}-07-01` : null); if (!from) return null;
-  const days = -daysUntil(from); if (days == null || days < 0) return null;
+  const from = a.purchased || (/^\d{4}$/.test(String(a.year || '')) ? `${a.year}-07-01` : null); if (!from) return null;
+  const days = -daysUntil(from); if (!Number.isFinite(days) || days < 0) return null;
   return { years: Math.floor(days / 365.25), days, since: a.purchased ? `bought ${fmtDate(a.purchased)}` : `${a.year} model` };
 }
 function carDash(a) {
@@ -436,7 +437,7 @@ function carDash(a) {
       <form class="odo-form" data-odo="${a.id}"><input type="number" inputmode="numeric" min="1" step="1" placeholder="${odo ? 'New reading' : 'Reading today'}" aria-label="Odometer reading"><button class="btn small" type="submit">Update</button></form></div>
     <div class="tile ${next ? (next.i.eff < 0 ? 'warn' : next.i.eff <= 30 ? 'soon' : '') : ''}"><div class="n small">${next ? esc(next.s.task) : 'Nothing due'}</div><div class="l">next up${next ? ` · ${esc(dueText(next.s)[0])}` : ''}</div></div>
     <div class="tile"><div class="n">${money(spent) || '$0'}</div><div class="l">spent, 12 months</div></div>
-    <div class="tile"><div class="n">${age ? age.years : '—'}</div><div class="l">${age ? `yrs old · ${esc(age.since)}` : 'age unknown'}</div></div>
+    <div class="tile"><div class="n">${age ? (age.years < 1 ? '<1' : age.years) : '—'}</div><div class="l">${age ? `yrs old · ${esc(age.since)}` : 'age unknown'}</div></div>
   </div>`;
 }
 
@@ -1076,7 +1077,8 @@ function bindMap() {
   }
   function closeCard() { mapState.sel = null; card.hidden = true; light(null); }
   card.addEventListener('click', e => { const sel = e.target.closest('[data-sel]'); if (sel) { selectAsset(sel.dataset.sel, true); return; } if (e.target.closest('[data-close]')) closeCard(); });
-  if (mapState.sel && store.assets[mapState.sel] && mapState.mode === 'view') selectAsset(mapState.sel); else { mapState.sel = null; card.hidden = true; }
+  const selA = store.assets[mapState.sel]; const selHere = selA && mapState.mode === 'view' && resolvePlaced(mapState.floor).some(p => !p.lost && p.a.id === (hostOf(selA) || selA).id);
+  if (selHere) selectAsset(mapState.sel); else { mapState.sel = null; card.hidden = true; }
   function showTip(id, e) {
     if (!id || mapState.mode === 'edit' || id === mapState.sel) { tip.hidden = true; return; }
     if (tip.dataset.id !== id) { tip.innerHTML = tipHtml(id); tip.dataset.id = id; }
@@ -1498,7 +1500,7 @@ document.addEventListener('click', async e => {
     openEditor(el.dataset.coll, base, presets);
   }
   else if (a === 'edit') openEditor(el.dataset.coll, store[el.dataset.coll][el.dataset.id]);
-  else if (a === 'home-map') { const g = e.target.closest('[data-asset]'), f = e.target.closest('[data-focus]'); mapState.mode = 'view'; mapState.cam = null; mapState.sel = null; if (g) { mapState.sel = g.dataset.asset; mapState.focusAsset = g.dataset.asset; } else if (f) mapState.focus = f.dataset.focus; location.hash = '#/map'; }
+  else if (a === 'home-map') { const g = e.target.closest('[data-asset]'), f = e.target.closest('[data-focus]'); mapState.mode = 'view'; mapState.cam = null; mapState.sel = null; mapState.placing = null; mapState.tool = null; if (g) { mapState.sel = g.dataset.asset; mapState.focusAsset = g.dataset.asset; } else if (f) mapState.focus = f.dataset.focus; location.hash = '#/map'; }
   else if (a === 'complete') completeSchedule(el.dataset.id);
   else if (a === 'complete-sheet') { const sch = store.schedule[el.dataset.id]; if (sch) openDoneSheet(sch); }
   else if (a === 'toggle-todo') toggleTodo(el.dataset.id);
@@ -1523,7 +1525,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => { if (e.target.dataset.action === 'import' && e.target.files[0]) importJSON(e.target.files[0]); });
 document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('label.btn')) { const inp = e.target.querySelector('input[type="file"]'); if (inp) { e.preventDefault(); inp.click(); } }
-  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.action === 'home-map') { e.preventDefault(); location.hash = '#/map'; }
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.action === 'home-map') { e.preventDefault(); e.target.click(); }
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.id === 'page-editor') { e.preventDefault(); $('[data-action="save-page"]').click(); }
   if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && state.user && !/input|textarea|select/i.test(e.target.tagName) && !$('#editor').open) { e.preventDefault(); openPicker(); }
 });
