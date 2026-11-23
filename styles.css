@@ -145,6 +145,8 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -.01
 .ibar { display: block; height: 4px; border-radius: 2px; background: var(--rule); margin-top: 6px; max-width: 220px; overflow: hidden; }
 .ibar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 .ibar.soon i { background: var(--amber); } .ibar.over i { background: var(--danger); }
+.ibar.life { margin-top: 5px; } .props .ibar { max-width: none; margin: 6px 0 2px; }
+.props .sub { display: block; font-size: 12px; color: var(--ink-3); }
 .rows input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; flex: none; }
 .rows li.done .t { color: var(--ink-3); text-decoration: line-through; }
 

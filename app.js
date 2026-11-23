@@ -52,6 +52,7 @@ const SCHEMA = {
     { k: 'serial', l: 'Serial / VIN', t: 'text' },
     { k: 'year', l: 'Year', t: 'number' },
     { k: 'purchased', l: 'Purchased', t: 'date' },
+    { k: 'life', l: 'Typical life (years)', t: 'number', ph: 'blank: typical for its kind' },
     { k: 'odometer', l: 'Odometer (mi)', t: 'number', car: true },
     { k: 'odometerOn', l: 'Odometer read on', t: 'date', car: true },
     { k: 'specs', l: 'Specs', t: 'text', ph: 'Filter size, oil spec, tire size', wide: true },
@@ -283,6 +284,8 @@ function home() {
       <section class="card"><header><h2>Projects</h2><a class="more" href="#/projects">all</a></header>
         ${projects.length ? `<ul class="rows">${projects.map(p => `<li><a class="t" href="#/projects/${p.id}">${esc(p.name)}<span class="sub">${esc(p.summary || '')}</span></a>${chip(p.status)}${p.liveUrl ? `<a class="m" href="${esc(p.liveUrl)}" target="_blank" rel="noopener">open ↗</a>` : ''}</li>`).join('')}</ul>` : `<div class="empty">No live projects.</div>`}
       </section>
+      ${(() => { const aging = list('assets').map(a => ({ a, lf: lifespan(a) })).filter(x => x.lf && x.lf.pct >= .7).sort((x, y) => y.lf.pct - x.lf.pct).slice(0, 6); return aging.length ? `<section class="card"><header><h2>Getting on in years</h2><a class="more" href="#/assets">assets</a></header>
+        <ul class="rows">${aging.map(({ a, lf }) => `<li><a class="t" href="#/assets/${a.id}">${esc(a.name)}<span class="sub">${esc(a.make || a.type || '')}</span>${lifeBar(lf)}</a><span class="m ${lf.pct >= 1 ? 'due' : ''}">${lf.pct >= 1 ? 'past typical life' : `${lf.age.years} of ~${lf.years} yrs`}</span></li>`).join('')}</ul></section>` : ''; })()}
       <section class="card"><header><h2>Recently edited pages</h2><a class="more" href="#/pages">all</a></header>
         ${pages.length ? `<ul class="rows">${pages.map(p => `<li><a class="t" href="#/pages/${p.slug}">${esc(p.title)}</a>${chip(p.area)}<span class="m">${new Date(p.updated).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></li>`).join('')}</ul>` : `<div class="empty">No pages yet. Pages are free-form notes: a house overview, a car's quirks, a contractor list.</div>`}
       </section>
@@ -373,7 +376,7 @@ function assets(id) {
   for (const a of rows) (groups[a.area || 'Other'] ||= []).push(a);
   return `
     ${head('Assets', { eyebrow: 'things you maintain', actions: btn('+ Asset', 'new', 'data-coll="assets"', 'btn primary small') })}
-    ${rows.length ? `<div class="grid">${Object.entries(groups).map(([area, items]) => `<section class="card"><header><h2>${esc(area)}</h2><span class="more">${items.length}</span></header><ul class="rows">${items.map(a => `<li><a class="t" href="#/assets/${a.id}">${esc(a.name)}<span class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</span></a><span class="m">${esc(a.year || '')}</span></li>`).join('')}</ul></section>`).join('')}</div>`
+    ${rows.length ? `<div class="grid">${Object.entries(groups).map(([area, items]) => `<section class="card"><header><h2>${esc(area)}</h2><span class="more">${items.length}</span></header><ul class="rows">${items.map(a => { const lf = lifespan(a); return `<li><a class="t" href="#/assets/${a.id}">${esc(a.name)}<span class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</span></a>${lf && lf.pct >= .8 ? `<span class="m ${lf.pct >= 1 ? 'due' : ''}">${lf.pct >= 1 ? 'past typical life' : `${lf.age.years} of ~${lf.years} yrs`}</span>` : ''}<span class="m">${esc(a.year || '')}</span></li>`; }).join('')}</ul></section>`).join('')}</div>`
     : `<div class="card"><div class="empty">No assets yet. Start with the furnace, the water heater and each car. Put the filter size or oil spec in Specs and it's one tap away at the store.<div class="row" style="margin-top:10px">${btn('Add my cars', 'seed-cars', '', 'btn primary small')}</div></div></div>`}`;
 }
 
@@ -385,7 +388,7 @@ function assetDetail(id) {
   const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
   const room = assetRoom(a); const host = a.parent ? store.assets[a.parent] : null; const inside = parts(id); const carrier = hostOf(a); const carrierRoom = carrier && assetRoom(carrier);
-  const props = [['Area', chip(a.area)], ['Installed in', host ? `<a href="#/assets/${host.id}">${esc(host.name)}</a>` : ''], ['Contains', inside.length ? inside.map(c => `<a href="#/assets/${c.id}">${esc(c.name)}</a>`).join(', ') : ''], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">${/\.pdf(\?|$)/i.test(a.manual) ? 'PDF' : 'open'} ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : carrier ? `<a href="#/map" data-action="map-goto" data-floor="${esc(carrier.map.floor)}" data-focus="${esc(carrierRoom ? roomKey(carrierRoom) : '')}">with ${esc(carrier.name)}${carrierRoom ? ` in ${esc(carrierRoom.name)}` : ''}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
+  const props = [['Area', chip(a.area)], ['Installed in', host ? `<a href="#/assets/${host.id}">${esc(host.name)}</a>` : ''], ['Contains', inside.length ? inside.map(c => `<a href="#/assets/${c.id}">${esc(c.name)}</a>`).join(', ') : ''], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Age', (() => { const age = ageOf(a), lf = lifespan(a); return age ? `${age.years} yr${age.years === 1 ? '' : 's'} · ${esc(age.since)}${lf ? `${lifeBar(lf)}<span class="sub">${esc(lf.text)}</span>` : ''}` : ''; })()], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">${/\.pdf(\?|$)/i.test(a.manual) ? 'PDF' : 'open'} ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : carrier ? `<a href="#/map" data-action="map-goto" data-floor="${esc(carrier.map.floor)}" data-focus="${esc(carrierRoom ? roomKey(carrierRoom) : '')}">with ${esc(carrier.name)}${carrierRoom ? ` in ${esc(carrierRoom.name)}` : ''}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
   return `
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
@@ -402,6 +405,21 @@ function assetDetail(id) {
     </div>`;
 }
 
+// Typical service life in years by kind of thing (appliance-industry and insurer tables); an asset's own 'life' field overrides it.
+const LIFE = [
+  [/fridge|refrigerator|freezer/i, 13], [/dishwasher/i, 10], [/washer|washing/i, 11], [/dryer/i, 13], [/range|oven|stove|cooktop/i, 14], [/microwave/i, 9],
+  [/\btv\b|television|oled|qled/i, 8], [/receiver|amplifier|soundbar/i, 12], [/speaker|subwoofer/i, 20],
+  [/water heater/i, 11], [/furnace|boiler/i, 18], [/heat pump|air cond|condenser|mini.?split|\bac\b/i, 15], [/surge protector/i, 7], [/panel|breaker/i, 30],
+  [/garage door/i, 12], [/roof/i, 22], [/mower|tractor|snow ?blower/i, 10], [/generator/i, 20], [/router|wifi|modem/i, 5], [/thermostat/i, 10],
+  [/crosstrek|outback|forester|legacy|subaru|\bcar\b|sedan|suv|truck|crossover/i, 15]];
+function lifespan(a) {
+  const t = `${a.name} ${a.type || ''} ${a.make || ''}`; const years = a.life != null && a.life !== '' ? Number(a.life) : (LIFE.find(([re]) => re.test(t)) || [])[1];
+  const age = ageOf(a); if (!years || !age) return null;
+  const pct = age.days / (years * 365.25);
+  return { years, age, pct, text: pct >= 1 ? `past its typical ${years}-year life` : `${age.years} of ~${years} typical years` };
+}
+const lifeBar = lf => lf ? `<span class="ibar life ${lf.pct >= .8 ? 'soon' : ''}"><i style="width:${Math.min(100, lf.pct * 100).toFixed(0)}%"></i></span>` : '';
+const lifeLine = a => { const lf = lifespan(a); return lf ? `<div class="tip-line">${lf.pct >= 1 ? `${lf.age.years} yrs old, past its typical ${lf.years}-year life` : `${lf.age.years} yrs old · typical life ~${lf.years} yrs`}</div>` : ''; };
 // A car's dashboard: the odometer (with a one-line update), what is next, a year of spending and its age.
 function ageOf(a) {
   const from = a.purchased || (a.year ? `${a.year}-07-01` : null); if (!from) return null;
@@ -1012,7 +1030,7 @@ function tipHtml(id) {
   const odo = a.area === 'Car' ? odometerOf(a.id) : null;
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
-    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}
+    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}${lifeLine(a)}
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
     ${st.parts.length ? `<div class="tip-line">Inside: ${esc(st.parts.map(c => c.name).join(', '))}</div>` : ''}
     ${st.todos.length ? `<div class="tip-line">${st.todos.length} open to-do${st.todos.length > 1 ? 's' : ''}: ${esc(st.todos.slice(0, 2).map(t => t.name).join(', '))}</div>` : ''}
@@ -1028,7 +1046,7 @@ function cardHtml(id) {
   const odo = a.area === 'Car' ? odometerOf(a.id) : null;
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
-    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}
+    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}${lifeLine(a)}
     ${host ? `<div class="tip-line">Inside <button type="button" class="link" data-sel="${host.id}">${esc(host.name)}</button>${room ? ` · ${esc(room.name)}` : ''}</div>` : room ? `<div class="tip-line">${esc(room.name)}</div>` : ''}
     ${inside.length ? `<div class="tip-sub">Inside this</div><ul class="tip-parts">${inside.map(c => { const cs = assetStatus(c.id); return `<li><button type="button" data-sel="${c.id}"><span class="glyph">${assetIcon(c)}</span><span class="t">${esc(c.name)}<span class="sub">${esc(cs.label)}</span></span><i class="dot ${cs.cls}"></i></button></li>`; }).join('')}</ul>` : ''}
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
