@@ -319,6 +319,7 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .obj .port { fill: #34496a; stroke: #e2e9f1; stroke-width: 1.5; }
 .obj .strip .ft { fill: #b5c4d6; } .obj .strip .fx, .obj .strip .fy { fill: #8ea3bb; }
 .obj .burner { fill: #2a3c55; }
+.obj .screen .fy { fill: #16243a; } .obj .screen .fx { fill: #2b3b55; } .obj .screen .ft { fill: #3a4d6a; }
 .obj .tank .ft { fill: var(--model-top); }
 .obj .glyph { font-size: 22px; pointer-events: none; }
 .marker .foot { fill: #fff; fill-opacity: .92; stroke: var(--bp-none); stroke-width: 2.5; }
