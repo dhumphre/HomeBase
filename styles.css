@@ -5,7 +5,7 @@
   --surface-2: #e9ede9;
   --ink: #17221f;
   --ink-2: #55615d;
-  --ink-3: #8a948f;
+  --ink-3: #6b756f;
   --rule: #dde2de;
   --rule-2: #ecefec;
   --accent: #2f6b4f;
@@ -31,7 +31,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #121715; --surface: #1a211e; --surface-2: #222b27; --ink: #e8ece9; --ink-2: #a7b0ab; --ink-3: #6f7873;
+    --bg: #121715; --surface: #1a211e; --surface-2: #222b27; --ink: #e8ece9; --ink-2: #a7b0ab; --ink-3: #8b958f;
     --rule: #2a332f; --rule-2: #222b27; --accent: #6fbf94; --accent-ink: #8ed3ad; --accent-soft: #1f3129;
     --amber: #e0a648; --amber-soft: #3a2f16; --danger: #e06b6b; --danger-soft: #3d1f1f; --grid: rgba(232,236,233,.04);
     --on-accent: #0e1a14; --blue-soft: #1d2b3c; --blue-ink: #9cc0ea; --brown-soft: #332a1b; --brown-ink: #e0c38f; --purple-soft: #2c2440; --purple-ink: #c9b7f0;
@@ -42,7 +42,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #121715; --surface: #1a211e; --surface-2: #222b27; --ink: #e8ece9; --ink-2: #a7b0ab; --ink-3: #6f7873;
+  --bg: #121715; --surface: #1a211e; --surface-2: #222b27; --ink: #e8ece9; --ink-2: #a7b0ab; --ink-3: #8b958f;
   --rule: #2a332f; --rule-2: #222b27; --accent: #6fbf94; --accent-ink: #8ed3ad; --accent-soft: #1f3129;
   --amber: #e0a648; --amber-soft: #3a2f16; --danger: #e06b6b; --danger-soft: #3d1f1f; --grid: rgba(232,236,233,.04);
   --on-accent: #0e1a14; --blue-soft: #1d2b3c; --blue-ink: #9cc0ea; --brown-soft: #332a1b; --brown-ink: #e0c38f; --purple-soft: #2c2440; --purple-ink: #c9b7f0;
@@ -206,9 +206,9 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -.01
 .md-editor .hint { font-size: 12.5px; color: var(--ink-3); }
 
 /* ---------- editor dialog ---------- */
-dialog { border: 1px solid var(--rule); border-radius: 14px; padding: 0; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog { border: 1px solid var(--rule); border-radius: 14px; padding: 0; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
 dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px); }
-.editor form { display: flex; flex-direction: column; max-height: calc(100vh - 32px); }
+.editor form { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); }
 .editor header, .editor footer { display: flex; align-items: center; gap: 8px; padding: 14px 18px; }
 .editor header { border-bottom: 1px solid var(--rule-2); }
 .editor header h2 { font-size: 18px; flex: 1; }
@@ -251,7 +251,8 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .map-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; align-items: start; }
 .map-wrap { position: relative; background: radial-gradient(ellipse at 50% 42%, #1f4a7c 0%, var(--sheet) 45%, var(--sheet-2) 100%); border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); box-shadow: var(--shadow), inset 0 0 0 1px rgba(0,0,0,.25); overflow: hidden; color: var(--sheet-ink); }
 .map-wrap::before { content: ""; position: absolute; inset: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 4px; pointer-events: none; }
-.map-wrap svg { display: block; width: 100%; height: auto; max-height: calc(100vh - 150px); min-height: 380px; touch-action: none; user-select: none; cursor: grab; }
+.map-wrap svg { display: block; width: 100%; height: auto; max-height: calc(100vh - 150px); min-height: 380px; touch-action: pan-y; user-select: none; cursor: grab; }
+.map-wrap.zoomed svg, .map-wrap.edit svg { touch-action: none; } /* the page scrolls past the drawing until it is zoomed or being edited */
 .map-wrap.panning svg { cursor: grabbing; }
 .map-wrap.edit svg { cursor: crosshair; }
 .map-wrap.placing svg { cursor: copy; }
@@ -398,12 +399,14 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 /* ---------- mobile ---------- */
 @media (max-width: 760px) {
   .shell { grid-template-columns: 1fr; }
-  .sidebar { position: sticky; top: 0; height: auto; z-index: 20; flex-direction: row; align-items: center; gap: 12px; padding: 10px max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px)); border-right: 0; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+  .sidebar { position: sticky; top: 0; height: auto; z-index: 20; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px)); border-right: 0; border-bottom: 1px solid var(--rule); }
   .sidebar .wordmark { font-size: 17px; flex: none; }
-  .nav { flex-direction: row; gap: 2px; flex: none; }
+  .nav { flex-direction: row; flex-wrap: wrap; gap: 2px; flex: 1 1 100%; order: 3; }
   .nav a { padding: 6px 9px; font-size: 13.5px; }
   .nav a .k { display: none; }
-  .sidebar-foot { margin-top: 0; flex-direction: row; align-items: center; flex: none; }
+  .sidebar-foot { margin-top: 0; margin-left: auto; flex-direction: row; align-items: center; flex: none; }
+  .rows .t { white-space: normal; }
+  .rows li .btn.small { min-height: 36px; }
   .who span { display: none; }
   .main { padding: 18px max(14px, env(safe-area-inset-right, 0px)) 60px max(14px, env(safe-area-inset-left, 0px)); }
   .detail { grid-template-columns: 1fr; }
@@ -415,6 +418,6 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
   .sheet-title { left: 12px; bottom: 10px; padding-left: 8px; }
   .sheet-title b { font-size: 13px; }
   .sheet-title span { font-size: 9.5px; }
-  .map-reset { top: 12px; right: 12px; }
+  .map-reset { top: 12px; right: 12px; left: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
