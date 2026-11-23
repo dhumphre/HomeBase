@@ -548,7 +548,7 @@ function assetStatusDeep(id) {
   const walk = pid => { for (const c of parts(pid)) { if (seen.has(c.id)) continue; seen.add(c.id); worst.parts.push(c); const st = assetStatus(c.id); if (WORST.indexOf(st.cls) < WORST.indexOf(worst.cls)) worst = { ...worst, ...st, from: c, parts: worst.parts }; walk(c.id); } };
   walk(id); if (worst.from) worst.label = `${worst.from.name}: ${worst.label}`; return worst;
 }
-const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/tv|television|oled|qled/i, '📺'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
+const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/tv|television|oled|qled/i, '📺'], [/receiver|amplifier|soundbar|speaker|stereo|subwoofer/i, '🔊'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
 function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
 const SCALE = 11; // map units per foot: the garage is 250 units across, about a 23 ft two-car garage
 const ft = v => Math.round(v * SCALE);
@@ -557,6 +557,7 @@ const SHAPES = [
   [/crosstrek|outback|forester|suv|wagon|truck|jeep|4runner|pickup|minivan|van\b/i, { kind: 'car', w: 6, d: 15, h: 5.4, tall: true }],
   [/\bcar\b|sedan|subaru|toyota|honda|ford|tesla|legacy|civic|accord|camry|coupe|hatchback/i, { kind: 'car', w: 6, d: 15.5, h: 4.7 }],
   [/tv|television|oled|qled/i, { kind: 'tv', w: 4.8, d: 0.9, h: 2.9 }],
+  [/receiver|amplifier|soundbar|console|player/i, { kind: 'box', w: 1.5, d: 1.3, h: 0.6 }],
   [/washer|washing/i, { kind: 'washer', w: 2.3, d: 2.4, h: 3.2 }],
   [/dryer/i, { kind: 'dryer', w: 2.3, d: 2.4, h: 3.2 }],
   [/fridge|refrigerator|freezer/i, { kind: 'fridge', w: 3, d: 2.6, h: 5.8 }],
