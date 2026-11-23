@@ -166,7 +166,7 @@ async function signIn() {
     const code = e && e.code || '';
     if (/popup-blocked|popup-closed|cancelled-popup|operation-not-supported/.test(code)) {
       try { sessionStorage.setItem('hb-redirect', '1'); } catch {}
-      try { await signInWithRedirect(auth, provider); } catch (e2) { msg.textContent = `Sign-in failed (${e2.code || e2.message}).`; msg.hidden = false; }
+      try { await signInWithRedirect(auth, provider); } catch (e2) { try { sessionStorage.removeItem('hb-redirect'); } catch {} msg.textContent = `Sign-in failed (${e2.code || e2.message}).`; msg.hidden = false; }
     } else { msg.textContent = `Sign-in failed (${code || e.message}).`; msg.hidden = false; }
   }
 }
