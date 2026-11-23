@@ -41,6 +41,7 @@ const SCHEMA = {
     { k: 'name', l: 'Name', t: 'text', req: true, wide: true },
     { k: 'area', l: 'Area', t: 'select', opts: AREAS },
     { k: 'room', l: 'Room on the map', t: 'room' },
+    { k: 'parent', l: 'Installed in / part of', t: 'asset' },
     { k: 'type', l: 'Type', t: 'text', ph: 'Furnace, water heater, sedan' },
     { k: 'make', l: 'Make / model', t: 'text' },
     { k: 'serial', l: 'Serial / VIN', t: 'text' },
@@ -351,8 +352,8 @@ function assetDetail(id) {
   const sched = list('schedule').filter(s => s.asset === id).sort((x, y) => (x.nextDue || '9999') > (y.nextDue || '9999') ? 1 : -1);
   const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-  const room = assetRoom(a);
-  const props = [['Area', chip(a.area)], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">open ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
+  const room = assetRoom(a); const host = a.parent ? store.assets[a.parent] : null; const inside = parts(id); const carrier = hostOf(a); const carrierRoom = carrier && assetRoom(carrier);
+  const props = [['Area', chip(a.area)], ['Installed in', host ? `<a href="#/assets/${host.id}">${esc(host.name)}</a>` : ''], ['Contains', inside.length ? inside.map(c => `<a href="#/assets/${c.id}">${esc(c.name)}</a>`).join(', ') : ''], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">open ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : carrier ? `<a href="#/map" data-action="map-goto" data-floor="${esc(carrier.map.floor)}" data-focus="${esc(carrierRoom ? roomKey(carrierRoom) : '')}">with ${esc(carrier.name)}${carrierRoom ? ` in ${esc(carrierRoom.name)}` : ''}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
   return `
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
@@ -487,7 +488,7 @@ function resolvePlaced(floorId) {
   const m = mapData(); const rooms = m.rooms.filter(r => r.floor === floorId); const groups = roomGroups(rooms);
   const out = [], byRoom = new Map();
   for (const a of list('assets')) {
-    if (!a.map || a.map.floor !== floorId) continue;
+    if (!a.map || a.map.floor !== floorId || hostOf(a)) continue;
     if (a.map.room) { if (!byRoom.has(a.map.room)) byRoom.set(a.map.room, []); byRoom.get(a.map.room).push(a); }
     else if (a.map.x != null) out.push({ a, shape: assetShape(a, roomAt(a.map)), x: a.map.x, y: a.map.y, auto: false });
   }
@@ -517,7 +518,7 @@ const shortName = (n, max = 15) => { n = String(n || ''); return n.length > max 
 // Per room: how many components and the worst status among them, for the badge under the room name.
 function roomSummary(placed, rooms) {
   const out = new Map();
-  for (const p of placed) { const r = p.a.map.room ? rooms.find(x => roomKey(x) === p.a.map.room) : roomAt({ floor: p.a.map.floor, x: p.x, y: p.y }); if (!r) continue; const k = roomKey(r); const cls = assetStatus(p.a.id).cls; const cur = out.get(k) || { n: 0, cls: 'none' }; cur.n++; if (WORST.indexOf(cls) < WORST.indexOf(cur.cls)) cur.cls = cls; out.set(k, cur); }
+  for (const p of placed) { const r = p.a.map.room ? rooms.find(x => roomKey(x) === p.a.map.room) : roomAt({ floor: p.a.map.floor, x: p.x, y: p.y }); if (!r) continue; const k = roomKey(r); const cls = assetStatusDeep(p.a.id).cls; const cur = out.get(k) || { n: 0, cls: 'none' }; cur.n++; if (WORST.indexOf(cls) < WORST.indexOf(cur.cls)) cur.cls = cls; out.set(k, cur); }
   return out;
 }
 const onWall = (d, r) => d.dir === 'h' ? (r.y === d.y || r.y + r.h === d.y) && d.x > r.x && d.x < r.x + r.w : (r.x === d.x || r.x + r.w === d.x) && d.y > r.y && d.y < r.y + r.h;
@@ -536,6 +537,16 @@ function assetStatus(id) {
   const cls = worst == null ? (todos.length ? 'todo' : 'none') : worst < 0 ? 'over' : worst <= 30 ? 'soon' : 'ok';
   const label = cls === 'over' ? `${-worst}d overdue` : cls === 'soon' ? (worst === 0 ? 'due today' : `due in ${worst}d`) : cls === 'ok' ? 'all good' : cls === 'todo' ? `${todos.length} open to-do${todos.length > 1 ? 's' : ''}` : 'nothing scheduled';
   return { cls, worst, todos, items, last, label };
+}
+// Docking: parts(id) are the assets installed in it; hostOf(a) is the placed asset that carries a docked part on the map; isInside guards against loops.
+const parts = id => list('assets').filter(a => a.parent === id).sort(by('name'));
+function isInside(a, rootId) { let p = a; for (let i = 0; p && i < 12; i++) { if (p.id === rootId) return true; p = p.parent ? store.assets[p.parent] : null; } return false; }
+function hostOf(a) { let p = a && a.parent ? store.assets[a.parent] : null; for (let i = 0; p && !p.map && p.parent && i < 12; i++) p = store.assets[p.parent]; return p && p.map ? p : null; }
+// The status of an asset together with everything installed in it: the worst one wins, and the label says which part it came from.
+function assetStatusDeep(id) {
+  let worst = { ...assetStatus(id), from: null, parts: [] }; const seen = new Set([id]);
+  const walk = pid => { for (const c of parts(pid)) { if (seen.has(c.id)) continue; seen.add(c.id); worst.parts.push(c); const st = assetStatus(c.id); if (WORST.indexOf(st.cls) < WORST.indexOf(worst.cls)) worst = { ...worst, ...st, from: c, parts: worst.parts }; walk(c.id); } };
+  walk(id); if (worst.from) worst.label = `${worst.from.name}: ${worst.label}`; return worst;
 }
 const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
 function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
@@ -614,7 +625,7 @@ function map() {
   const rooms = m.rooms.filter(r => r.floor === floor.id);
   const doors = m.doors.filter(d => d.floor === floor.id);
   const entries = resolvePlaced(floor.id); const placed = entries.filter(p => !p.lost); placed.forEach((p, i) => { p.n = i + 1; });
-  const unplaced = list('assets').filter(a => !a.map || entries.some(p => p.lost && p.a.id === a.id)).sort(by('name'));
+  const unplaced = list('assets').filter(a => !hostOf(a) && (!a.map || entries.some(p => p.lost && p.a.id === a.id))).sort(by('name'));
   const summary = roomSummary(placed, rooms);
   const edit = mapState.mode === 'edit';
   const sel = edit && mapState.selected ? m.rooms.find(r => r.id === mapState.selected) : null;
@@ -634,18 +645,18 @@ function map() {
     const h = d.dir === 'h', hw = d.w / 2, x0 = h ? d.x - hw : d.x, y0 = h ? d.y : d.y - hw, x1 = h ? d.x + hw : d.x, y1 = h ? d.y : d.y + hw;
     const leaf = d.w >= 80 ? '' : h ? `<path class="swing" d="M${x0} ${y0 + d.w}A${d.w} ${d.w} 0 0 0 ${x1} ${y0}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + d.w}"/>` : `<path class="swing" d="M${x0 + d.w} ${y0}A${d.w} ${d.w} 0 0 1 ${x0} ${y1}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0 + d.w}" y2="${y0}"/>`;
     return `<g class="door" data-door="${d.id}"><line class="sill" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/>${leaf}${edit ? `<rect class="hit" x="${d.x - hw - 6}" y="${d.y - hw - 6}" width="${d.w + 12}" height="${d.w + 12}"/>` : ''}</g>`; }).join('');
-  const markersSvg = placed.map(({ a, x, y, auto, n, shape }) => { const st = assetStatus(a.id); const { w, d } = shape; const gs = Math.max(11, Math.min(26, Math.min(w, d) * 0.6)); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
+  const markersSvg = placed.map(({ a, x, y, auto, n, shape }) => { const st = assetStatusDeep(a.id); const { w, d } = shape; const gs = Math.max(11, Math.min(26, Math.min(w, d) * 0.6)); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
       <rect class="foot" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" rx="3"/>
       <text class="glyph" y="${gs * 0.36}" text-anchor="middle" font-size="${gs}">${assetIcon(a)}</text>
       <g class="num"><circle cx="${w / 2}" cy="${-d / 2}" r="9"/><text x="${w / 2}" y="${-d / 2 + 3.5}" text-anchor="middle">${n}</text></g>
-      <text class="mlabel" y="${d / 2 + 14}" text-anchor="middle">${esc(shortName(a.name, 20).toUpperCase())}</text>
+      <text class="mlabel" y="${d / 2 + 14}" text-anchor="middle">${esc(shortName(a.name, 20).toUpperCase())}${st.parts.length ? ` +${st.parts.length}` : ''}</text>
     </g>`; }).join('');
   const bg = m.bg[floor.id] ? `<image href="${m.bg[floor.id]}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : '';
   const iso = !edit && mapState.view === 'iso';
 
   const floorTabs = `<div class="seg">${m.floors.map(f => `<button type="button" aria-pressed="${f.id === floor.id}" data-action="map-floor" data-id="${f.id}">${esc(f.name)}</button>`).join('')}</div>`;
   const viewTabs = edit ? '' : `<div class="seg"><button type="button" aria-pressed="${iso}" data-action="map-view" data-value="iso">3D</button><button type="button" aria-pressed="${!iso}" data-action="map-view" data-value="plan">Plan</button></div>`;
-  const statusRows = placed.map(({ a, n }) => ({ a, n, st: assetStatus(a.id) }));
+  const statusRows = placed.map(({ a, n }) => ({ a, n, st: assetStatusDeep(a.id) }));
   const worstRow = statusRows.slice().sort((x, y) => WORST.indexOf(x.st.cls) - WORST.indexOf(y.st.cls))[0];
 
   const panel = edit ? `
@@ -673,7 +684,7 @@ function map() {
         <ul class="legend"><li><i class="over"></i>Overdue</li><li><i class="soon"></i>Due within 30 days</li><li><i class="todo"></i>Open to-do</li><li><i class="ok"></i>All good</li><li><i class="none"></i>Nothing scheduled</li></ul>
       </section>
       <section class="card"><header><h2>On ${esc(floor.name)}</h2><span class="more">${placed.length}</span></header>
-        ${statusRows.length ? `<ul class="rows keyed">${statusRows.map(({ a, n, st }) => `<li data-hl="${a.id}"><span class="key">${n}</span><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc((assetRoom(a) || {}).name || 'pinned')} · ${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>`).join('')}</ul>` : `<div class="empty">Nothing on this floor yet. Give an asset a room (edit the asset, or Edit layout here) and it appears.</div>`}
+        ${statusRows.length ? `<ul class="rows keyed">${statusRows.map(({ a, n, st }) => `<li data-hl="${a.id}"><span class="key">${n}</span><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc((assetRoom(a) || {}).name || 'pinned')} · ${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>${st.parts.map(c => `<li class="part" data-hl="${a.id}"><span class="key dim">↳</span><a class="t" href="#/assets/${c.id}">${assetIcon(c)} ${esc(c.name)}<span class="sub">in ${esc(a.name)} · ${esc(assetStatus(c.id).label)}</span></a><i class="dot ${assetStatus(c.id).cls}"></i></li>`).join('')}`).join('')}</ul>` : `<div class="empty">Nothing on this floor yet. Give an asset a room (edit the asset, or Edit layout here) and it appears.</div>`}
       </section>
       <section class="card"><header><h2>Reading the drawing</h2></header><div class="map-panel"><p class="hint">Scroll or pinch to zoom, drag to pan. Click a room name to zoom into it, double-click empty ground to zoom out. Numbers on the plinths match the list; hover one for its status, click to open it.</p></div></section>`;
 
@@ -686,7 +697,7 @@ function map() {
         </svg>`;
 
   return `
-    ${head('Map', { eyebrow: `${new Set(m.rooms.map(r => `${r.floor}|${roomKey(r)}`)).size} rooms · ${list('assets').filter(a => a.map).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
+    ${head('Map', { eyebrow: `${new Set(m.rooms.map(r => `${r.floor}|${roomKey(r)}`)).size} rooms · ${list('assets').filter(a => a.map || hostOf(a)).length} of ${list('assets').length} components placed`, actions: floorTabs + viewTabs + (edit ? btn('Done editing', 'map-mode', 'data-value="view"', 'btn primary small') : btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')) })}
     ${!rooms.length && !edit ? `<div class="callout"><p><b>No rooms on ${esc(floor.name)} yet.</b> Draw a few rooms, or upload a floor plan image as the background, then place components. Rough is fine; this is a stage, not a survey.</p><div class="row">${btn('Load my house', 'map-load-house', '', 'btn primary small')}${btn('Edit layout', 'map-mode', 'data-value="edit"', 'btn small')}</div></div>` : ''}
     <div class="map-layout">
       <div class="map-wrap ${edit ? 'edit' : ''} ${placingAsset || mapState.tool ? 'placing' : ''} ${iso ? 'iso' : 'plan'} ${placed.length > 8 ? 'busy' : ''}">
@@ -767,7 +778,7 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
   for (const d of doors) { const { floor, leaf, depth } = isoDoor(d, wallAt(pieces, d)); flat.push(floor); if (leaf) ents.push({ d: depth, k: 0.5, html: leaf }); }
   // callouts: back to front, each takes the lowest height above its object whose label does not cover another label
   for (const p of placed.slice().sort((a, b) => a.x + a.y - b.x - b.y)) {
-    const w = shortName(p.a.name, 20).length * 9.2 + 34;
+    const w = (shortName(p.a.name, 20).length + (parts(p.a.id).length ? 3 : 0)) * 9.2 + 34;
     p.up = claim([40, 68, 96, 124, 152, 180], up => { const T = isoP(p.x, p.y, p.z0 + p.shape.h + up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
   }
   for (const p of placed) { const m = isoObject(p); ents.push({ d: p.x + p.y, k: 1, html: m.body }); labels.push(m.callout); }
@@ -826,7 +837,7 @@ function carModel(shape, cx, cy, z0) {
 }
 // Draw one component as a small model to scale, standing at (x, y) with its base at height z0: a car, an appliance, a tank, or a plain crate with its glyph.
 function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
-  const st = assetStatus(a.id); const { kind, w, d, h } = shape;
+  const st = assetStatusDeep(a.id); const { kind, w, d, h } = shape;
   const x0 = x - w / 2, x1 = x + w / 2, y0 = y - d / 2, y1 = y + d / 2;
   const B = (bx0, by0, bx1, by1, bz0, bz1, cls) => isoBox(bx0, by0, bx1, by1, bz1 - bz0, cls, z0 + bz0);
   // a circle lying flat (plane z), or standing on a face that looks along +y or +x
@@ -847,7 +858,7 @@ function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
   else { parts += B(x0, y0, x1, y1, 0, h, 'crate') + glyph(Math.max(11, Math.min(30, Math.min(w, d) * 0.6)), h); }
   const pad = isoPts([isoP(x0 - 4, y0 - 4, z0), isoP(x1 + 4, y0 - 4, z0), isoP(x1 + 4, y1 + 4, z0), isoP(x0 - 4, y1 + 4, z0)]);
   const N = isoP(x1, y0, z0 + h); const Tp = isoP(x, y, z0 + h), T = isoP(x, y, z0 + h + up);
-  const name = shortName(a.name, 20).toUpperCase(); const cw = name.length * 9.2 + 34;
+  const name = shortName(a.name, 20).toUpperCase() + (st.parts.length ? ` +${st.parts.length}` : ''); const cw = name.length * 9.2 + 34;
   const body = `<g class="marker obj iso ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
       <polygon class="pad" points="${pad}"/>${parts}
       <g class="num"><circle cx="${f1(N.X + 9)}" cy="${f1(N.Y - 9)}" r="10"/><text x="${f1(N.X + 9)}" y="${f1(N.Y - 5)}" text-anchor="middle">${n || ''}</text></g>
@@ -863,11 +874,12 @@ function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
 
 function tipHtml(id) {
   const a = store.assets[id]; if (!a) return '';
-  const st = assetStatus(id);
+  const st = assetStatusDeep(id);
   const next = st.items.slice(0, 3).map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m ', '')}">${lbl}</span></li>`; }).join('');
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
+    ${st.parts.length ? `<div class="tip-line">Inside: ${esc(st.parts.map(c => c.name).join(', '))}</div>` : ''}
     ${st.todos.length ? `<div class="tip-line">${st.todos.length} open to-do${st.todos.length > 1 ? 's' : ''}: ${esc(st.todos.slice(0, 2).map(t => t.name).join(', '))}</div>` : ''}
     ${st.last ? `<div class="tip-line">Last: ${esc(st.last.item)} · ${fmtDate(st.last.date)}</div>` : '<div class="tip-line">No work logged yet</div>'}
     ${a.specs ? `<div class="tip-line mono">${esc(a.specs)}</div>` : ''}
@@ -1090,7 +1102,7 @@ function openEditor(coll, data = {}, presets = {}) {
     const id = `f-${f.k}`;
     let input;
     if (f.t === 'select') input = `<select id="${id}" name="${f.k}">${f.opts.map(o => `<option value="${esc(o)}" ${String(v) === String(o) ? 'selected' : ''}>${esc(o) || '—'}</option>`).join('')}</select>`;
-    else if (f.t === 'asset') { const opts = list('assets').sort(by('name')); input = `<select id="${id}" name="${f.k}"><option value="">— none —</option>${opts.map(a => `<option value="${a.id}" ${v === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`; }
+    else if (f.t === 'asset') { const opts = list('assets').filter(a => !(data.id && isInside(a, data.id))).sort(by('name')); input = `<select id="${id}" name="${f.k}"><option value="">— none —</option>${opts.map(a => `<option value="${a.id}" ${v === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`; }
     else if (f.t === 'room') { const cur = roomValue(data); input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${roomOptions(cur)}</select>`; }
     else if (f.t === 'md') input = `<textarea id="${id}" name="${f.k}" spellcheck="true">${esc(v)}</textarea>`;
     else input = `<input id="${id}" name="${f.k}" type="${f.t === 'md' ? 'text' : f.t}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} ${f.t === 'number' ? 'step="any" inputmode="decimal"' : ''}>`;
