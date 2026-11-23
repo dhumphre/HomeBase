@@ -395,9 +395,10 @@ function assets(id) {
 function assetDetail(id) {
   const a = store.assets[id];
   if (!a) return head('Not found', { crumbs: `<a href="#/assets">Assets</a>` });
-  const history = list('log').filter(l => l.asset === id).sort(by('date', -1));
-  const sched = assetStatus(id).items;
-  const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
+  const mine = withParts(id); const onPart = x => x.asset !== id && mine.has(x.asset); // rows that belong to something installed in this
+  const history = list('log').filter(l => mine.has(l.asset)).sort(by('date', -1));
+  const sched = (() => { const all = list('schedule').filter(s => mine.has(s.asset)).map(s => ({ s, i: dueInfo(s) })); const dated = all.filter(x => x.i.eff != null).sort((p, q) => p.i.eff - q.i.eff); return [...dated, ...all.filter(x => x.i.eff == null)].map(x => x.s); })();
+  const open = list('todos').filter(t => mine.has(t.asset) && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
   const room = assetRoom(a); const host = a.parent ? store.assets[a.parent] : null; const inside = parts(id); const carrier = hostOf(a); const carrierRoom = carrier && assetRoom(carrier);
   const props = [['Area', chip(a.area)], ['Installed in', host ? `<a href="#/assets/${host.id}">${esc(host.name)}</a>` : ''], ['Contains', inside.length ? inside.map(c => `<a href="#/assets/${c.id}">${esc(c.name)}</a>`).join(', ') : ''], ['Type', esc(a.type)], ['Make / model', esc(a.make)], ['Serial / VIN', a.serial ? `<code>${esc(a.serial)}</code>` : ''], ['Year', esc(a.year)], ['Purchased', fmtDate(a.purchased)], ['Age', (() => { const age = ageOf(a), lf = lifespan(a); return age ? `${ageText(age)} · ${esc(age.since)}${lf ? `${lifeBar(lf)}<span class="sub">${esc(lf.text)}</span>` : ''}` : ''; })()], ['Specs', esc(a.specs)], ['Contact', esc(a.contact)], ['Manual', a.manual ? `<a href="${esc(a.manual)}" target="_blank" rel="noopener">${/\.pdf(\?|$)/i.test(a.manual) ? 'PDF' : 'open'} ↗</a>` : ''], ['On map', a.map && (room || a.map.x != null) ? `<a href="#/map" data-action="map-goto" data-floor="${esc(a.map.floor)}" data-focus="${esc(room ? roomKey(room) : '')}">${esc(room ? room.name : floorName(a.map.floor))}</a>` : carrier ? `<a href="#/map" data-action="map-goto" data-floor="${esc(carrier.map.floor)}" data-focus="${esc(carrierRoom ? roomKey(carrierRoom) : '')}">with ${esc(carrier.name)}${carrierRoom ? ` in ${esc(carrierRoom.name)}` : ''}</a>` : btn('Place on map', 'map-place', `data-id="${id}"`, 'btn small')], ['Spent', spent ? money(spent) : '']].filter(([, v]) => v);
@@ -408,9 +409,9 @@ function assetDetail(id) {
         ${a.area === 'Car' ? carDash(a) : ''}
         ${a.notes ? `<div class="page-body prose">${md(a.notes)}</div>` : ''}
         <div class="section"><h2>Service history <span class="more" style="font-family:var(--mono);font-size:12px;color:var(--ink-3)">${history.length}</span></h2>
-          <div class="card">${history.length ? `<ul class="rows">${history.map(l => `<li><a class="t" href="#/log/${l.id}">${esc(l.item)}<span class="sub">${esc(l.doneBy || '')}${l.mileage ? ' · ' + Number(l.mileage).toLocaleString() + ' mi' : ''}</span></a><span class="m">${money(l.cost)}</span><span class="m">${fmtDate(l.date)}</span></li>`).join('')}</ul>` : `<div class="empty">No work logged for this yet.</div>`}</div></div>
+          <div class="card">${history.length ? `<ul class="rows">${history.map(l => `<li><a class="t" href="#/log/${l.id}">${esc(l.item)}<span class="sub">${[onPart(l) ? assetName(l.asset) : '', l.doneBy || '', l.mileage ? `${miles(l.mileage)} mi` : ''].filter(Boolean).map(esc).join(' · ')}</span></a><span class="m">${money(l.cost)}</span><span class="m">${fmtDate(l.date)}</span></li>`).join('')}</ul>` : `<div class="empty">No work logged for this yet.</div>`}</div></div>
         <div class="section"><h2>${a.area === 'Car' ? 'Service intervals' : 'Schedule'}</h2>
-          <div class="card">${sched.length ? `<ul class="rows">${sched.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(intervalText(s))}${s.lastDone ? ` · last ${fmtDate(s.lastDone)}` : ''}${s.lastMiles != null && s.lastMiles !== '' ? ` at ${miles(s.lastMiles)} mi` : ''}</span>${intervalBar(s)}</a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing scheduled for this.</div>`}</div></div>
+          <div class="card">${sched.length ? `<ul class="rows">${sched.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${onPart(s) ? `${esc(assetName(s.asset))} · ` : ''}${esc(intervalText(s))}${s.lastDone ? ` · last ${fmtDate(s.lastDone)}` : ''}${s.lastMiles != null && s.lastMiles !== '' ? ` at ${miles(s.lastMiles)} mi` : ''}</span>${intervalBar(s)}</a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing scheduled for this.</div>`}</div></div>
         ${open.length ? `<div class="section"><h2>Open to-dos</h2><div class="card"><ul class="rows">${open.map(todoRow).join('')}</ul></div></div>` : ''}
       </div>
       <aside class="card"><dl class="props">${props.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></aside>
@@ -442,7 +443,7 @@ function ageOf(a) {
 function carDash(a) {
   const odo = odometerOf(a.id);
   const next = list('schedule').filter(s => s.asset === a.id).map(s => ({ s, i: dueInfo(s) })).filter(x => x.i.eff != null).sort((p, q) => p.i.eff - q.i.eff)[0];
-  const spent = list('log').filter(l => l.asset === a.id && daysUntil(l.date) >= -365).reduce((t, l) => t + (Number(l.cost) || 0), 0);
+  const mine = withParts(a.id); const spent = list('log').filter(l => mine.has(l.asset) && daysUntil(l.date) >= -365).reduce((t, l) => t + (Number(l.cost) || 0), 0);
   const age = ageOf(a);
   return `<div class="tiles car-dash">
     <div class="tile odo"><div class="n">${odo ? miles(odo.miles) : '—'}</div><div class="l">${odo ? `odometer · read ${fmtDate(odo.on)}${odo.estimated ? '' : ` · ~${miles(Math.round(odo.perDay * 365))} mi/yr`}` : 'odometer · no reading yet'}</div>
@@ -675,7 +676,7 @@ function assetStatus(id) {
   const items = [...dated.map(x => x.s), ...all.filter(x => x.i.eff == null).map(x => x.s)];
   const worst = dated.length ? dated[0].i.eff : null; const top = dated[0] ? dated[0].i : null;
   const todos = list('todos').filter(t => t.asset === id && t.status !== 'done');
-  const last = list('log').filter(l => l.asset === id).sort(by('date', -1))[0] || null;
+  const mine = withParts(id); const last = list('log').filter(l => mine.has(l.asset)).sort(by('date', -1))[0] || null;
   const needs = all.some(x => x.i.needsOdometer) ? 'odometer' : all.some(x => x.i.needsBaseline) ? 'baseline' : null;
   const cls = worst == null ? (todos.length ? 'todo' : 'none') : worst < 0 ? 'over' : worst <= 30 ? 'soon' : 'ok';
   const label = cls === 'over' ? (top.basis === 'miles' ? `${miles(-top.milesLeft)} mi over` : `${-worst}d overdue`)
@@ -686,6 +687,8 @@ function assetStatus(id) {
 }
 // Docking: parts(id) are the assets installed in it; hostOf(a) is the placed asset that carries a docked part on the map; isInside guards against loops.
 const parts = id => list('assets').filter(a => a.parent === id).sort(by('name'));
+// An asset and everything installed in it, however deep (loops guarded): work on a car's wheel set belongs in the car's history too.
+function withParts(id) { const ids = new Set([id]); const walk = pid => { for (const c of parts(pid)) if (!ids.has(c.id)) { ids.add(c.id); walk(c.id); } }; walk(id); return ids; }
 function isInside(a, rootId) { let p = a; for (let i = 0; p && i < 12; i++) { if (p.id === rootId) return true; p = p.parent ? store.assets[p.parent] : null; } return false; }
 function hostOf(a) { let p = a && a.parent ? store.assets[a.parent] : null; for (let i = 0; p && !p.map && p.parent && i < 12; i++) p = store.assets[p.parent]; return p && p.map ? p : null; }
 // The status of an asset together with everything installed in it: the worst one wins, and the label says which part it came from.
@@ -694,7 +697,7 @@ function assetStatusDeep(id) {
   const walk = pid => { for (const c of parts(pid)) { if (seen.has(c.id)) continue; seen.add(c.id); worst.parts.push(c); const st = assetStatus(c.id); if (WORST.indexOf(st.cls) < WORST.indexOf(worst.cls)) worst = { ...worst, ...st, from: c, parts: worst.parts }; walk(c.id); } };
   walk(id); if (worst.from) worst.label = `${worst.from.name}: ${worst.label}`; return worst;
 }
-const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/entertainment center|media console|tv stand|tv cabinet|credenza|sideboard/i, '🗄️'], [/\btv\b|television|oled|qled/i, '📺'], [/receiver|amplifier|soundbar|speaker|stereo|subwoofer/i, '🔊'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
+const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/wheel|tire|tyre/i, '🛞'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/entertainment center|media console|tv stand|tv cabinet|credenza|sideboard/i, '🗄️'], [/\btv\b|television|oled|qled/i, '📺'], [/receiver|amplifier|soundbar|speaker|stereo|subwoofer/i, '🔊'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
 function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
 const SCALE = 11; // map units per foot: the garage is 250 units across, about a 23 ft two-car garage
 const ft = v => Math.round(v * SCALE);
