@@ -28,6 +28,7 @@ tool('remove_room', 'Remove a room (every piece with that name) from the house m
 tool('add_door', 'Add a door on a wall of the house map at a point (x,y) on that wall; dir "h" for a wall running left-right, "v" for up-down; width 36 for a door, 120 for a wide opening or garage door.', { x: z.number(), y: z.number(), dir: z.enum(['h', 'v']), w: z.number().optional(), floor: z.string().optional() }, a => hb.addDoor(a));
 tool('remove_door', 'Remove a door from the house map by its id (see map).', { id: z.string() }, a => hb.removeDoor(a.id));
 tool('dock', 'Install one asset inside another (a surge protector in the electrical panel, a filter in the furnace): it rides with its host on the map and its status rolls up. Omit parent to undock.', { asset: z.string(), parent: z.string().optional() }, a => hb.dock(a.asset, a.parent || null));
+tool('turn', 'Rotate an asset already on the map so its front faces n (back of the map), s (toward the viewer), e or w.', { asset: z.string(), facing: z.enum(['n', 's', 'e', 'w']) }, a => hb.turn(a.asset, a.facing));
 tool('map', 'Floors, rooms, doors and placed assets of the house map.', {}, () => hb.mapSummary());
 tool('household', 'Who can open the logbook (Google accounts on the access list); add or remove an email.', { add: z.string().optional(), remove: z.string().optional() }, async a => { if (a.add) await hb.share(a.add); if (a.remove) await hb.unshare(a.remove); return hb.shares(); });
 

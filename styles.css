@@ -305,22 +305,22 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .marker .num { pointer-events: none; transform-box: fill-box; transform-origin: center; }
 .marker .num circle { fill: #0f2a4d; stroke: #fff; stroke-width: 1.5; }
 .marker .num text { font: 700 11.5px var(--mono); fill: #fff; }
-/* objects: small models to scale on a status-coloured pad */
+/* objects: small models to scale on a status-coloured pad. Faces carry ft/fx/fy for which way they look, plus what they are. */
+.obj .ft { fill: var(--model-top); } .obj .fx { fill: var(--model-x); } .obj .fy { fill: var(--model-y); }
 .obj .pad { fill: var(--bp-none); fill-opacity: .12; stroke: var(--bp-none); stroke-width: 1.5; stroke-dasharray: 5 3; }
 .obj.ok .pad { fill: var(--bp-ok); stroke: var(--bp-ok); } .obj.soon .pad { fill: var(--bp-soon); stroke: var(--bp-soon); } .obj.over .pad { fill: var(--bp-over); stroke: var(--bp-over); animation: padpulse 1.6s ease-in-out infinite; } .obj.todo .pad { fill: var(--bp-todo); stroke: var(--bp-todo); }
 .obj:hover .pad, .obj.lit .pad, .obj.hov .pad { stroke-width: 3; fill-opacity: .32; stroke-dasharray: none; }
 @keyframes padpulse { 50% { fill-opacity: .4; } }
-.obj .cabin { fill: #4e6a8e; } .obj .cabin.fy { fill: #43607f; } .obj .cabin.roof { fill: #f7fafc; }
-.obj .body.ft { fill: var(--model-top); } .obj .body.fx { fill: var(--model-x); } .obj .body.fy { fill: var(--model-y); }
-.obj .tail { fill: #e0524f; stroke: #8c2b2b; stroke-width: .8; }
-.obj .wheel { fill: #1a2838; stroke: #6b82a0; stroke-width: 1.5; }
-.obj .lamp { fill: #fff3c4; stroke: #c9b98a; stroke-width: .8; }
-.obj .seam { stroke: #7d93ae; stroke-width: 1.2; }
-.obj .port { fill: #34496a; stroke: #e2e9f1; stroke-width: 1.5; }
-.obj .strip .ft { fill: #b5c4d6; } .obj .strip .fx, .obj .strip .fy { fill: #8ea3bb; }
-.obj .burner { fill: #2a3c55; }
-.obj .screen .fy { fill: #16243a; } .obj .screen .fx { fill: #2b3b55; } .obj .screen .ft { fill: #3a4d6a; }
-.obj .tank .ft { fill: var(--model-top); }
+.obj .cabin.fx, .obj .cabin.fy { fill: #4e6a8e; } .obj .cabin.fy { fill: #43607f; } .obj .cabin.roof { fill: #f7fafc; }
+.obj .wheel.fx, .obj .wheel.fy { fill: #1a2838; stroke: #6b82a0; stroke-width: 1.5; }
+.obj .lamp.fx, .obj .lamp.fy { fill: #fff3c4; stroke: #c9b98a; stroke-width: .8; }
+.obj .tail.fx, .obj .tail.fy { fill: #e0524f; stroke: #8c2b2b; stroke-width: .8; }
+.obj .port.fx, .obj .port.fy { fill: #34496a; stroke: #e2e9f1; stroke-width: 1.5; }
+.obj .strip.ft { fill: #b5c4d6; } .obj .strip.fx, .obj .strip.fy { fill: #8ea3bb; }
+.obj .burner.ft { fill: #2a3c55; }
+.obj .seam.fx, .obj .seam.fy { fill: #7d93ae; }
+.obj .screen.fy { fill: #16243a; } .obj .screen.fx { fill: #2b3b55; } .obj .screen.ft { fill: #3a4d6a; }
+.obj .cabinet.ft { fill: #d9cdb8; } .obj .cabinet.fx { fill: #b89f7c; } .obj .cabinet.fy { fill: #a08662; }
 .obj .glyph { font-size: 22px; pointer-events: none; }
 .marker .foot { fill: #fff; fill-opacity: .92; stroke: var(--bp-none); stroke-width: 2.5; }
 .marker.ok .foot { stroke: var(--bp-ok); } .marker.soon .foot { stroke: var(--bp-soon); } .marker.over .foot { stroke: var(--bp-over); } .marker.todo .foot { stroke: var(--bp-todo); }

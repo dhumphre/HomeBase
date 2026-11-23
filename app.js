@@ -42,6 +42,7 @@ const SCHEMA = {
     { k: 'area', l: 'Area', t: 'select', opts: AREAS },
     { k: 'room', l: 'Room on the map', t: 'room' },
     { k: 'parent', l: 'Installed in / part of', t: 'asset' },
+    { k: 'facing', l: 'Facing', t: 'facing' },
     { k: 'type', l: 'Type', t: 'text', ph: 'Furnace, water heater, sedan' },
     { k: 'make', l: 'Make / model', t: 'text' },
     { k: 'serial', l: 'Serial / VIN', t: 'text' },
@@ -548,7 +549,7 @@ function assetStatusDeep(id) {
   const walk = pid => { for (const c of parts(pid)) { if (seen.has(c.id)) continue; seen.add(c.id); worst.parts.push(c); const st = assetStatus(c.id); if (WORST.indexOf(st.cls) < WORST.indexOf(worst.cls)) worst = { ...worst, ...st, from: c, parts: worst.parts }; walk(c.id); } };
   walk(id); if (worst.from) worst.label = `${worst.from.name}: ${worst.label}`; return worst;
 }
-const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/tv|television|oled|qled/i, '📺'], [/receiver|amplifier|soundbar|speaker|stereo|subwoofer/i, '🔊'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
+const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/entertainment center|media console|tv stand|tv cabinet|credenza|sideboard/i, '🗄️'], [/\btv\b|television|oled|qled/i, '📺'], [/receiver|amplifier|soundbar|speaker|stereo|subwoofer/i, '🔊'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
 function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
 const SCALE = 11; // map units per foot: the garage is 250 units across, about a 23 ft two-car garage
 const ft = v => Math.round(v * SCALE);
@@ -556,7 +557,8 @@ const ft = v => Math.round(v * SCALE);
 const SHAPES = [
   [/crosstrek|outback|forester|suv|wagon|truck|jeep|4runner|pickup|minivan|van\b/i, { kind: 'car', w: 6, d: 15, h: 5.4, tall: true }],
   [/\bcar\b|sedan|subaru|toyota|honda|ford|tesla|legacy|civic|accord|camry|coupe|hatchback/i, { kind: 'car', w: 6, d: 15.5, h: 4.7 }],
-  [/tv|television|oled|qled/i, { kind: 'tv', w: 4.8, d: 0.9, h: 2.9 }],
+  [/entertainment center|media console|tv stand|tv cabinet|credenza|sideboard/i, { kind: 'console', w: 6, d: 1.7, h: 2 }],
+  [/\btv\b|television|oled|qled/i, { kind: 'tv', w: 4.8, d: 0.9, h: 2.9 }],
   [/receiver|amplifier|soundbar|console|player/i, { kind: 'box', w: 1.5, d: 1.3, h: 0.6 }],
   [/washer|washing/i, { kind: 'washer', w: 2.3, d: 2.4, h: 3.2 }],
   [/dryer/i, { kind: 'dryer', w: 2.3, d: 2.4, h: 3.2 }],
@@ -745,7 +747,7 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
   for (const r of rooms) all.push(isoP(r.x, r.y, ISO_H), isoP(r.x + r.w, r.y, ISO_H), isoP(r.x, r.y + r.h, -SLAB - 16), isoP(r.x + r.w, r.y + r.h, -SLAB - 16), isoP(r.x + r.w, r.y), isoP(r.x, r.y + r.h));
   const indoor = rooms.filter(r => r.kind !== 'outdoor');
   const baseZ = p => { const r = p.a.map.room ? rooms.find(x => roomKey(x) === p.a.map.room) : roomAt({ floor: p.a.map.floor, x: p.x, y: p.y }); return r && r.kind === 'outdoor' ? -SLAB : 0; };
-  for (const p of placed) { p.z0 = baseZ(p); const { w, d, h } = p.shape; all.push(isoP(p.x - w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y - d / 2, p.z0 + h)); const T = isoP(p.x, p.y, p.z0 + h + 160); all.push(T, { X: T.X + 36 + shortName(p.a.name, 20).length * 9.2, Y: T.Y }); }
+  for (const p of placed) { p.z0 = baseZ(p); const { w, d, h } = p.shape; all.push(isoP(p.x - w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y - d / 2, p.z0 + h + 40)); const T = isoP(p.x, p.y, p.z0 + h + 200); all.push(T, { X: T.X + 36 + shortName(p.a.name, 20).length * 9.2, Y: T.Y }); }
   if (!all.length) all.push(isoP(gx0, gy0), isoP(gx1, gy0), isoP(gx1, gy1), isoP(gx0, gy1));
   const minX = Math.min(...all.map(p => p.X)) - 36, maxX = Math.max(...all.map(p => p.X)) + 36, minY = Math.min(...all.map(p => p.Y)) - 36, maxY = Math.max(...all.map(p => p.Y)) + 36;
 
@@ -781,7 +783,8 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
   // callouts: back to front, each takes the lowest height above its object whose label does not cover another label
   for (const p of placed.slice().sort((a, b) => a.x + a.y - b.x - b.y)) {
     const w = (shortName(p.a.name, 20).length + (parts(p.a.id).length ? 3 : 0)) * 9.2 + 34;
-    p.up = claim([40, 68, 96, 124, 152, 180], up => { const T = isoP(p.x, p.y, p.z0 + p.shape.h + up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
+    const top = p.shape.h + (p.shape.kind === 'console' && parts(p.a.id).some(c => assetShape(c).kind === 'tv') ? ft(3.2) : 0);
+    p.up = claim([40, 68, 96, 124, 152, 180], up => { const T = isoP(p.x, p.y, p.z0 + top + up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
   }
   for (const p of placed) { const m = isoObject(p); ents.push({ d: p.x + p.y, k: 1, html: m.body }); labels.push(m.callout); }
   ents.sort((p, q) => p.d - q.d || p.k - q.k);
@@ -814,53 +817,64 @@ function isoDoor(d, wall) {
   const leaf = h ? isoBox(jx - 1.5, jy, jx + 1.5, jy + d.w, H, 'leaf') : isoBox(jx, jy - 1.5, jx + d.w, jy + 1.5, H, 'leaf');
   return { floor, leaf: `<g class="door iso" data-door="${d.id}">${leaf}</g>`, depth: h ? jx + jy + d.w / 2 : jx + d.w / 2 + jy };
 }
-// A car built in its own frame (u across, v along the body, nose at +v), turned to face shape.facing. Faces are drawn only when they look toward the camera.
-function carModel(shape, cx, cy, z0) {
-  const across = shape.facing === 'e' || shape.facing === 'w'; const w = across ? shape.d : shape.w, d = across ? shape.w : shape.d, h = shape.h, tall = shape.tall;
-  const clear = ft(0.8), roof = clear + ft(2.2), ins = w * 0.1, wr = ft(1.05);
-  const u0 = -w / 2, u1 = w / 2, v0 = -d / 2, v1 = d / 2; const faces = [];
-  const box = (a0, b0, a1, b1, zA, zB, cls) => { faces.push({ cls, n: [0, 0, 1], pts: [[a0, b0, zB], [a1, b0, zB], [a1, b1, zB], [a0, b1, zB]] }, { cls, n: [1, 0, 0], pts: [[a1, b0, zA], [a1, b1, zA], [a1, b1, zB], [a1, b0, zB]] }, { cls, n: [-1, 0, 0], pts: [[a0, b0, zA], [a0, b1, zA], [a0, b1, zB], [a0, b0, zB]] }, { cls, n: [0, 1, 0], pts: [[a0, b1, zA], [a1, b1, zA], [a1, b1, zB], [a0, b1, zB]] }, { cls, n: [0, -1, 0], pts: [[a0, b0, zA], [a1, b0, zA], [a1, b0, zB], [a0, b0, zB]] }); };
-  box(u0, v0, u1, v1, clear, roof, 'body');
-  for (const side of [-1, 1]) for (const vv of [v0 + d * 0.2, v1 - d * 0.2]) { const pts = []; for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2; pts.push([side * (w / 2 + 1), vv + wr * Math.cos(t), wr + wr * Math.sin(t)]); } faces.push({ cls: 'wheel', n: [side, 0, 0], pts }); }
+// Every component is modelled in its own frame (u across, v along, the front at +v) as a list of faces, then turned to face shape.facing
+// and projected; only faces that look toward the camera are drawn, shaded by which way they look.
+const faceBox = (faces, a0, b0, a1, b1, zA, zB, cls) => faces.push({ cls, n: [0, 0, 1], pts: [[a0, b0, zB], [a1, b0, zB], [a1, b1, zB], [a0, b1, zB]] }, { cls, n: [1, 0, 0], pts: [[a1, b0, zA], [a1, b1, zA], [a1, b1, zB], [a1, b0, zB]] }, { cls, n: [-1, 0, 0], pts: [[a0, b0, zA], [a0, b1, zA], [a0, b1, zB], [a0, b0, zB]] }, { cls, n: [0, 1, 0], pts: [[a0, b1, zA], [a1, b1, zA], [a1, b1, zB], [a0, b1, zB]] }, { cls, n: [0, -1, 0], pts: [[a0, b0, zA], [a1, b0, zA], [a1, b0, zB], [a0, b0, zB]] });
+// a circle: flat on top (plane 'z'), or standing on the front face ('v') or a side face ('u')
+const faceRing = (faces, cu, cv, r, z, cls, plane = 'z', side = 1) => { const pts = []; for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); pts.push(plane === 'z' ? [cu + r * c, cv + r * s, z] : plane === 'v' ? [cu + r * c, cv, z + r * s] : [cu, cv + r * c, z + r * s]); } faces.push({ cls, n: plane === 'z' ? [0, 0, 1] : plane === 'v' ? [0, side, 0] : [side, 0, 0], pts }); };
+function carFaces(w, d, h, tall) {
+  const clear = ft(0.8), roof = clear + ft(2.2), ins = w * 0.1, wr = ft(1.05), u0 = -w / 2, u1 = w / 2, v0 = -d / 2, v1 = d / 2; const faces = [];
+  faceBox(faces, u0, v0, u1, v1, clear, roof, 'body');
+  for (const side of [-1, 1]) for (const vv of [v0 + d * 0.2, v1 - d * 0.2]) faceRing(faces, side * (w / 2 + 1), vv, wr, wr, 'wheel', 'u', side);
   const c0 = u0 + ins, c1 = u1 - ins, cv0 = v0 + (tall ? d * 0.1 : d * 0.24), cv1 = v1 - d * 0.3, rake = d * 0.1, back = tall ? d * 0.04 : d * 0.08;
   faces.push({ cls: 'cabin', n: [1, 0, 0], pts: [[c1, cv0, roof], [c1, cv1, roof], [c1, cv1 - rake, h], [c1, cv0 + back, h]] }, { cls: 'cabin', n: [-1, 0, 0], pts: [[c0, cv0, roof], [c0, cv1, roof], [c0, cv1 - rake, h], [c0, cv0 + back, h]] },
     { cls: 'cabin', n: [0, 1, 0], pts: [[c0, cv1, roof], [c1, cv1, roof], [c1, cv1 - rake, h], [c0, cv1 - rake, h]] }, { cls: 'cabin', n: [0, -1, 0], pts: [[c0, cv0, roof], [c1, cv0, roof], [c1, cv0 + back, h], [c0, cv0 + back, h]] },
     { cls: 'cabin roof', n: [0, 0, 1], pts: [[c0, cv0 + back, h], [c1, cv0 + back, h], [c1, cv1 - rake, h], [c0, cv1 - rake, h]] });
   for (const hu of [u0 + w * 0.12, u1 - w * 0.12]) { const lo = clear + ft(1.1), hi = clear + ft(1.6), r = w * 0.09; faces.push({ cls: 'lamp', n: [0, 1, 0], pts: [[hu - r, v1 + 0.5, lo], [hu + r, v1 + 0.5, lo], [hu + r, v1 + 0.5, hi], [hu - r, v1 + 0.5, hi]] }, { cls: 'tail', n: [0, -1, 0], pts: [[hu - r, v0 - 0.5, lo], [hu + r, v0 - 0.5, lo], [hu + r, v0 - 0.5, hi], [hu - r, v0 - 0.5, hi]] }); }
-  const turn = { s: (u, v) => [u, v], n: (u, v) => [-u, -v], e: (u, v) => [v, -u], w: (u, v) => [-v, u] }[shape.facing] || ((u, v) => [u, v]);
+  return faces;
+}
+// Appliances and furniture: the front (controls, door, screen) is at +v.
+function objectFaces(shape, hasTv) {
+  const { kind, h } = shape; const across = shape.facing === 'e' || shape.facing === 'w'; const w = across ? shape.d : shape.w, d = across ? shape.w : shape.d;
+  const u0 = -w / 2, u1 = w / 2, v0 = -d / 2, v1 = d / 2; const faces = [];
+  if (kind === 'car') return carFaces(w, d, h, shape.tall);
+  if (kind === 'washer' || kind === 'dryer') { faceBox(faces, u0, v0, u1, v1, 0, h, 'appliance'); faceBox(faces, u0, v0, u1, v0 + d * 0.2, h, h + ft(0.3), 'strip'); faceRing(faces, 0, v1 + 0.5, w * (kind === 'washer' ? 0.3 : 0.26), h * 0.45, 'port', 'v'); }
+  else if (kind === 'fridge') { faceBox(faces, u0, v0, u1, v1, 0, h, 'appliance'); faces.push({ cls: 'seam', n: [0, 1, 0], pts: [[u0, v1 + 0.5, h * 0.64 - 0.4], [u1, v1 + 0.5, h * 0.64 - 0.4], [u1, v1 + 0.5, h * 0.64 + 0.4], [u0, v1 + 0.5, h * 0.64 + 0.4]] }); }
+  else if (kind === 'range') { faceBox(faces, u0, v0, u1, v1, 0, h, 'appliance'); for (const [du, dv] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]) faceRing(faces, du * w, dv * d, w * 0.13, h + 0.5, 'burner'); }
+  else if (kind === 'fan') { faceBox(faces, u0, v0, u1, v1, 0, h, 'appliance'); faceRing(faces, 0, 0, w * 0.36, h + 0.5, 'burner'); }
+  else if (kind === 'tv') { faceBox(faces, -w * 0.18, v0, w * 0.18, v1, 0, ft(0.25), 'strip'); faceBox(faces, u0, v0, u1, v0 + d * 0.7, ft(0.25), h, 'screen'); }
+  else if (kind === 'console') {
+    faceBox(faces, u0, v0, u1, v1, 0, h, 'cabinet');
+    for (const du of [-w / 6, w / 6]) faces.push({ cls: 'seam', n: [0, 1, 0], pts: [[du - 0.4, v1 + 0.5, ft(0.2)], [du + 0.4, v1 + 0.5, ft(0.2)], [du + 0.4, v1 + 0.5, h - ft(0.2)], [du - 0.4, v1 + 0.5, h - ft(0.2)]] });
+    if (hasTv) { const tw = Math.min(w * 0.9, ft(4.8)), th = ft(2.9); faceBox(faces, -tw * 0.18, -ft(0.45), tw * 0.18, ft(0.45), h, h + ft(0.25), 'strip'); faceBox(faces, -tw / 2, -ft(0.45), tw / 2, ft(0.2), h + ft(0.25), h + ft(0.25) + th, 'screen'); }
+  }
+  else faceBox(faces, u0, v0, u1, v1, 0, h, 'crate');
+  return faces;
+}
+function renderFaces(faces, cx, cy, z0, facing) {
+  const turn = { s: (u, v) => [u, v], n: (u, v) => [-u, -v], e: (u, v) => [v, -u], w: (u, v) => [-v, u] }[facing] || ((u, v) => [u, v]);
   let out = '';
   for (const f of faces) {
     const [nx, ny] = turn(f.n[0], f.n[1]); const nz = f.n[2];
     if (!(nz > 0 || nx + ny > 0)) continue;
-    const shade = nz > 0 ? 'ft' : nx > 0 ? 'fx' : 'fy';
-    out += `<polygon class="${f.cls} ${shade}" points="${isoPts(f.pts.map(([u, v, z]) => { const [dx, dy] = turn(u, v); return isoP(cx + dx, cy + dy, z0 + z); }))}"/>`;
+    out += `<polygon class="${f.cls} ${nz > 0 ? 'ft' : nx > 0 ? 'fx' : 'fy'}" points="${isoPts(f.pts.map(([u, v, z]) => { const [dx, dy] = turn(u, v); return isoP(cx + dx, cy + dy, z0 + z); }))}"/>`;
   }
   return out;
 }
-// Draw one component as a small model to scale, standing at (x, y) with its base at height z0: a car, an appliance, a tank, or a plain crate with its glyph.
+// Draw one component as a small model to scale, standing at (x, y) with its base at height z0, with its number and a drafting callout.
 function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
   const st = assetStatusDeep(a.id); const { kind, w, d, h } = shape;
   const x0 = x - w / 2, x1 = x + w / 2, y0 = y - d / 2, y1 = y + d / 2;
-  const B = (bx0, by0, bx1, by1, bz0, bz1, cls) => isoBox(bx0, by0, bx1, by1, bz1 - bz0, cls, z0 + bz0);
-  // a circle lying flat (plane z), or standing on a face that looks along +y or +x
-  const ring = (cx, cy, r, z, cls, plane = 'z') => { const pts = []; for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); pts.push(plane === 'z' ? isoP(cx + r * c, cy + r * s, z0 + z) : plane === 'y' ? isoP(cx + r * c, cy, z0 + z + r * s) : isoP(cx, cy + r * c, z0 + z + r * s)); } return `<polygon class="${cls}" points="${isoPts(pts)}"/>`; };
-  const cyl = (cx, cy, r, hh, cls) => { const N = 14; let out = ''; const top = []; for (let i = 0; i < N; i++) { const t0 = i / N * 2 * Math.PI, t1 = (i + 1) / N * 2 * Math.PI; const nx = Math.cos((t0 + t1) / 2), ny = Math.sin((t0 + t1) / 2); top.push(isoP(cx + r * Math.cos(t0), cy + r * Math.sin(t0), z0 + hh)); if (nx + ny > 0) { const p0 = [cx + r * Math.cos(t0), cy + r * Math.sin(t0)], p1 = [cx + r * Math.cos(t1), cy + r * Math.sin(t1)]; out += `<polygon style="fill:color-mix(in srgb, var(--model-x) ${Math.round((nx + 1) * 50)}%, var(--model-y))" points="${isoPts([isoP(p0[0], p0[1], z0), isoP(p1[0], p1[1], z0), isoP(p1[0], p1[1], z0 + hh), isoP(p0[0], p0[1], z0 + hh)])}"/>`; } } return `<g class="${cls}">${out}<polygon class="ft" points="${isoPts(top)}"/></g>`; };
-  const glyph = (size, z) => { const G = isoP(x, y, z0 + z); return `<text class="glyph" x="${f1(G.X)}" y="${f1(G.Y + size * 0.36)}" text-anchor="middle" font-size="${size}">${shape.icon}</text>`; };
+  const hasTv = kind === 'console' && st.parts.some(c => assetShape(c).kind === 'tv'); const top = h + (hasTv ? ft(3.2) : 0);
   let parts = '';
-  if (kind === 'car') parts += carModel(shape, x, y, z0);
-  else if (kind === 'washer' || kind === 'dryer') {
-    parts += B(x0, y0, x1, y1, 0, h, 'appliance') + B(x0, y0, x1, y0 + d * 0.2, h, h + ft(0.3), 'strip') + ring(x, y1 + 0.5, w * (kind === 'washer' ? 0.3 : 0.26), h * 0.45, 'port', 'y');
-  } else if (kind === 'fridge') {
-    const z = z0 + h * 0.64; const L = isoP(x0, y1 + 0.5, z), R = isoP(x1, y1 + 0.5, z);
-    parts += B(x0, y0, x1, y1, 0, h, 'appliance') + `<line class="seam" x1="${f1(L.X)}" y1="${f1(L.Y)}" x2="${f1(R.X)}" y2="${f1(R.Y)}"/>`;
-  } else if (kind === 'range') {
-    parts += B(x0, y0, x1, y1, 0, h, 'appliance'); for (const [dx, dy] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]) parts += ring(x + dx * w, y + dy * d, w * 0.13, h + 0.5, 'burner');
-  } else if (kind === 'tv') { parts += B(x - w * 0.18, y0, x + w * 0.18, y1, 0, ft(0.25), 'strip') + B(x0, y + d * 0.3, x1, y1, ft(0.25), h, 'screen'); }
-  else if (kind === 'cyl') { parts += cyl(x, y, w / 2, h, 'tank'); }
-  else if (kind === 'fan') { parts += B(x0, y0, x1, y1, 0, h, 'appliance') + ring(x, y, w * 0.36, h + 0.5, 'burner'); }
-  else { parts += B(x0, y0, x1, y1, 0, h, 'crate') + glyph(Math.max(11, Math.min(30, Math.min(w, d) * 0.6)), h); }
+  if (kind === 'cyl') { // a tank: a 14-sided prism, each side shaded by where it faces
+    const N = 14, r = w / 2; let side = ''; const cap = [];
+    for (let i = 0; i < N; i++) { const t0 = i / N * 2 * Math.PI, t1 = (i + 1) / N * 2 * Math.PI; const nx = Math.cos((t0 + t1) / 2), ny = Math.sin((t0 + t1) / 2); cap.push(isoP(x + r * Math.cos(t0), y + r * Math.sin(t0), z0 + h)); if (nx + ny > 0) { const p0 = [x + r * Math.cos(t0), y + r * Math.sin(t0)], p1 = [x + r * Math.cos(t1), y + r * Math.sin(t1)]; side += `<polygon style="fill:color-mix(in srgb, var(--model-x) ${Math.round((nx + 1) * 50)}%, var(--model-y))" points="${isoPts([isoP(p0[0], p0[1], z0), isoP(p1[0], p1[1], z0), isoP(p1[0], p1[1], z0 + h), isoP(p0[0], p0[1], z0 + h)])}"/>`; } }
+    parts = `<g class="tank">${side}<polygon class="ft" points="${isoPts(cap)}"/></g>`;
+  } else parts = renderFaces(objectFaces(shape, hasTv), x, y, z0, shape.facing);
+  if (kind === 'box' || kind === 'bin') { const size = Math.max(11, Math.min(30, Math.min(w, d) * 0.6)); const G = isoP(x, y, z0 + h); parts += `<text class="glyph" x="${f1(G.X)}" y="${f1(G.Y + size * 0.36)}" text-anchor="middle" font-size="${size}">${shape.icon}</text>`; }
   const pad = isoPts([isoP(x0 - 4, y0 - 4, z0), isoP(x1 + 4, y0 - 4, z0), isoP(x1 + 4, y1 + 4, z0), isoP(x0 - 4, y1 + 4, z0)]);
-  const N = isoP(x1, y0, z0 + h); const Tp = isoP(x, y, z0 + h), T = isoP(x, y, z0 + h + up);
+  const N = isoP(x1, y0, z0 + top); const Tp = isoP(x, y, z0 + top), T = isoP(x, y, z0 + top + up);
   const name = shortName(a.name, 20).toUpperCase() + (st.parts.length ? ` +${st.parts.length}` : ''); const cw = name.length * 9.2 + 34;
   const body = `<g class="marker obj iso ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
       <polygon class="pad" points="${pad}"/>${parts}
@@ -1109,6 +1123,7 @@ function openEditor(coll, data = {}, presets = {}) {
     if (f.t === 'select') input = `<select id="${id}" name="${f.k}">${f.opts.map(o => `<option value="${esc(o)}" ${String(v) === String(o) ? 'selected' : ''}>${esc(o) || '—'}</option>`).join('')}</select>`;
     else if (f.t === 'asset') { const opts = list('assets').filter(a => !(data.id && isInside(a, data.id))).sort(by('name')); input = `<select id="${id}" name="${f.k}"><option value="">— none —</option>${opts.map(a => `<option value="${a.id}" ${v === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`; }
     else if (f.t === 'room') { const cur = roomValue(data); input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${roomOptions(cur)}</select>`; }
+    else if (f.t === 'facing') { const cur = (data.map && data.map.facing) || ''; input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${[['', 'Default (cars outdoors face the house)'], ['s', 'South: front toward you'], ['n', 'North: front toward the back of the map'], ['e', 'East: front to the right'], ['w', 'West: front to the left']].map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`; }
     else if (f.t === 'md') input = `<textarea id="${id}" name="${f.k}" spellcheck="true">${esc(v)}</textarea>`;
     else input = `<input id="${id}" name="${f.k}" type="${f.t === 'md' ? 'text' : f.t}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} ${f.t === 'number' ? 'step="any" inputmode="decimal"' : ''}>`;
     return `<div class="field ${f.wide ? 'wide' : ''}"><label for="${id}">${esc(f.l)}</label>${input}</div>`;
@@ -1127,7 +1142,8 @@ $('#editor-form').addEventListener('submit', async e => {
   const out = { ...(dlg._base || {}) };
   for (const f of s.fields) {
     const el = $(`#f-${f.k}`); let v = el.value;
-    if (f.t === 'room') { if (v !== el.dataset.initial) { const [floor, ...rest] = v.split('|'); out.map = v ? { floor, room: rest.join('|') } : null; } continue; }
+    if (f.t === 'room') { if (v !== el.dataset.initial) { const [floor, ...rest] = v.split('|'); out.map = v ? { floor, room: rest.join('|'), ...(dlg._base.map && dlg._base.map.facing ? { facing: dlg._base.map.facing } : {}) } : null; } continue; }
+    if (f.t === 'facing') { if (v !== el.dataset.initial) { const m = out.map !== undefined ? out.map : dlg._base.map; if (m) { out.map = { ...m }; if (v) out.map.facing = v; else delete out.map.facing; } } continue; }
     if (f.t === 'number') v = v === '' ? null : Number(v);
     if (f.req && (v === '' || v == null)) { el.focus(); return; }
     out[f.k] = v === '' ? null : v;

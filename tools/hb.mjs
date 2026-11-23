@@ -18,6 +18,7 @@
 //   node tools/hb.mjs rmroom <name or id>            remove a room (every piece of that name)
 //   node tools/hb.mjs door --x 880 --y 340 --dir h [--w 36|120]   a door (w 120 = wide opening / garage door) on a wall at that point
 //   node tools/hb.mjs dock <asset> <parent> | undock <asset>   a part installed in another asset rides with it on the map (surge protector in the panel)
+//   node tools/hb.mjs turn <asset> n|s|e|w           rotate something already on the map (its front faces that way)
 //   node tools/hb.mjs rmdoor <id>                    remove a door
 //   node tools/hb.mjs map                            floors, rooms, doors and placed components
 //   node tools/hb.mjs share <email> | unshare <email> | shares     the household access list
@@ -52,6 +53,7 @@ try {
     case 'rmdoor': { const d = await hb.removeDoor(rest[0]); console.log(`Removed door at ${d.x},${d.y}`); break; }
     case 'dock': { const r = await hb.dock(rest[0], rest[1]); console.log(`${r.asset} is now installed in ${r.in}`); break; }
     case 'undock': { const r = await hb.dock(rest[0], null); console.log(`${r.asset} is on its own again`); break; }
+    case 'turn': { const r = await hb.turn(rest[0], rest[1]); console.log(`${r.asset} now faces ${r.facing}`); break; }
     case 'map': { const m = await hb.mapSummary(); for (const f of m.floors) { console.log(`${f.name} (${f.id})`); f.rooms.forEach(r => console.log(`  room ${r.name}  x${r.x} y${r.y} w${r.w} h${r.h}  color ${r.color}  ${r.id}`)); f.doors.forEach(d => console.log(`  door ${d.dir} at ${d.x},${d.y} w${d.w}  ${d.id}`)); f.assets.forEach(a => console.log(`  asset ${a.name} in ${a.room || '?'}${a.pinned ? ` (pinned ${a.pinned})` : ''}${a.parts && a.parts.length ? ` [contains ${a.parts.join(', ')}]` : ''}  ${a.id}`)); } console.log(`Unplaced: ${m.unplaced.join(', ') || 'none'}`); break; }
     case 'share': console.log(`Added ${await hb.share(rest[0])} to the household list`); break;
     case 'unshare': console.log(`Removed ${await hb.unshare(rest[0])} from the household list`); break;
