@@ -959,8 +959,9 @@ function bindMap() {
 
   svg.addEventListener('click', e => {
     if (mapState.mode !== 'view' || mapState.panned) return;
-    const f = e.target.closest('[data-focus]'); if (f) { focusRoom(svg, wrap, f.dataset.focus); return; }
-    const g = e.target.closest('[data-asset]'); if (g) location.hash = `#/assets/${g.dataset.asset}`;
+    const target = e.target === svg ? document.elementFromPoint(e.clientX, e.clientY) || e.target : e.target; // in case the pointer was captured
+    const f = target.closest('[data-focus]'); if (f) { focusRoom(svg, wrap, f.dataset.focus); return; }
+    const g = target.closest('[data-asset]'); if (g) location.hash = `#/assets/${g.dataset.asset}`;
   });
   svg.addEventListener('dblclick', e => { if (mapState.mode !== 'view') return; const rm = e.target.closest('[data-room]'); const r = rm && mapData().rooms.find(x => x.id === rm.dataset.room); if (r) focusRoom(svg, wrap, roomKey(r)); else setCam(svg, wrap, null); });
   if (mapState.focus) { const k = mapState.focus; mapState.focus = null; focusRoom(svg, wrap, k, false); }
@@ -1007,7 +1008,7 @@ function bindCamera(svg, wrap) {
   const pointers = new Map(); let pan = null, pinch = null;
   svg.addEventListener('pointerdown', e => {
     if (mapState.mode !== 'view' || e.button !== 0) return;
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch {}
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); // capture only once a pan really starts, or a plain click would be retargeted to the svg
     mapState.panned = false;
     if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) }; pan = null; }
     else pan = { x: e.clientX, y: e.clientY, v: vbOf(svg) };
@@ -1015,10 +1016,11 @@ function bindCamera(svg, wrap) {
   svg.addEventListener('pointermove', e => {
     if (!pointers.has(e.pointerId)) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pinch && pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (d > 0 && pinch.d > 0) zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinch.d); pinch.d = d; mapState.panned = true; return; }
+    const grab = () => { for (const id of pointers.keys()) try { svg.setPointerCapture(id); } catch {} };
+    if (pinch && pointers.size === 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (d > 0 && pinch.d > 0) zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinch.d); pinch.d = d; if (!mapState.panned) grab(); mapState.panned = true; return; }
     if (!pan) return;
     const dx = e.clientX - pan.x, dy = e.clientY - pan.y; if (!mapState.panned && Math.hypot(dx, dy) < 4) return;
-    mapState.panned = true; wrap.classList.add('panning'); const u = unit();
+    if (!mapState.panned) grab(); mapState.panned = true; wrap.classList.add('panning'); const u = unit();
     if (mapState.cam || vbOf(svg).w < mapState.base.w) setCam(svg, wrap, { x: pan.v.x - dx * u, y: pan.v.y - dy * u, w: pan.v.w, h: pan.v.h }, false);
   });
   const end = e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size) { pan = null; wrap.classList.remove('panning'); setTimeout(() => { mapState.panned = false; }, 0); } };
