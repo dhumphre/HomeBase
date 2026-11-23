@@ -248,7 +248,7 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .odo-form { display: flex; gap: 6px; margin-top: 10px; }
 .odo-form input { font: inherit; flex: 1; min-width: 0; width: 100%; padding: 5px 9px; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums; }
 .odo-form input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; border-color: var(--accent); }
-@media (max-width: 420px) { .car-dash .tile.odo { grid-column: 1 / -1; } }
+@media (max-width: 420px), (min-width: 761px) and (max-width: 899px) { .car-dash .tile.odo { grid-column: 1 / -1; } } /* one tile column: the odometer takes the whole row rather than spilling into a phantom second one */
 
 .callout { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .callout p { margin: 0; flex: 1; min-width: 220px; }
@@ -398,7 +398,7 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .tip-status.over { color: var(--danger); } .tip-status.soon { color: var(--amber); } .tip-status.ok { color: var(--accent-ink); } .tip-status.todo { color: var(--purple-ink); }
 .tip-list { list-style: none; margin: 0 0 6px; padding: 0; }
 .tip-list li { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border-top: 1px solid var(--rule-2); }
-.tip-list li span:last-child { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.tip-list li > span + span { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
 .tip-list .over { color: var(--danger); } .tip-list .due { color: var(--amber); }
 .tip-line { color: var(--ink-2); font-size: 12.5px; margin-top: 4px; }
 .tip-line.mono { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }

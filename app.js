@@ -35,7 +35,7 @@ const by = (k, dir = 1) => (a, b) => ((a[k] ?? '') > (b[k] ?? '') ? 1 : (a[k] ??
 let toastTimer;
 function toast(msg, isError = false) {
   const t = $('#toast'); t.textContent = msg; t.className = 'toast' + (isError ? ' error' : ''); t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 5000 : 2200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 5000 : Math.max(2200, Math.min(7000, msg.length * 45))); // long messages stay long enough to read
 }
 
 // ---------------------------------------------------------------- schema
@@ -53,7 +53,7 @@ const SCHEMA = {
     { k: 'year', l: 'Year', t: 'number' },
     { k: 'purchased', l: 'Purchased', t: 'date' },
     { k: 'life', l: 'Typical life (years)', t: 'number', ph: 'blank: typical for its kind' },
-    { k: 'odometer', l: 'Odometer (mi)', t: 'number', car: true },
+    { k: 'odometer', l: 'Odometer (mi)', t: 'number', car: true, min: 1 },
     { k: 'odometerOn', l: 'Odometer read on', t: 'date', car: true },
     { k: 'specs', l: 'Specs', t: 'text', ph: 'Filter size, oil spec, tire size', wide: true },
     { k: 'contact', l: 'Contact', t: 'text', ph: 'Plumber, dealer, warranty line', wide: true },
@@ -66,7 +66,7 @@ const SCHEMA = {
     { k: 'asset', l: 'Asset', t: 'asset', wide: true },
     { k: 'cost', l: 'Cost ($)', t: 'number' },
     { k: 'doneBy', l: 'Done by', t: 'select', opts: ['Me', 'Contractor', 'Dealer or shop'] },
-    { k: 'mileage', l: 'Odometer (mi)', t: 'number', car: true },
+    { k: 'mileage', l: 'Odometer (mi)', t: 'number', car: true, min: 1 },
     { k: 'notes', l: 'Notes (markdown)', t: 'md', wide: true } ] },
   schedule: { one: 'Scheduled task', many: 'Schedule', title: 'task', blurb: 'Recurring upkeep with a next-due date.', fields: [
     { k: 'task', l: 'Task', t: 'text', req: true, wide: true },
@@ -76,8 +76,8 @@ const SCHEMA = {
     { k: 'unit', l: 'Unit', t: 'select', opts: ['months', 'weeks', 'years'] },
     { k: 'nextDue', l: 'Next due', t: 'date' },
     { k: 'lastDone', l: 'Last done', t: 'date' },
-    { k: 'everyMiles', l: 'Or every (miles)', t: 'number', ph: '6000', car: true },
-    { k: 'lastMiles', l: 'Last done at (mi)', t: 'number', car: true },
+    { k: 'everyMiles', l: 'Or every (miles)', t: 'number', ph: '6000', car: true, min: 1 },
+    { k: 'lastMiles', l: 'Last done at (mi)', t: 'number', car: true, min: 1 },
     { k: 'season', l: 'Season', t: 'select', opts: ['', 'Spring', 'Summer', 'Fall', 'Winter'] },
     { k: 'notes', l: 'Notes', t: 'md', wide: true } ] },
   todos: { one: 'To-do', many: 'To-dos', title: 'name', blurb: 'Open work, big or small.', fields: [
@@ -222,7 +222,7 @@ const NAV = [
 function render() {
   const appEl = $('#app');
   if (!state.user) { appEl.dataset.state = 'out'; $('#landing').hidden = false; $('#shell').hidden = true; return; }
-  if (mapState.drag && state.route.view === 'map') { mapState.pendingRender = true; return; } // never re-render mid-drag
+  if (mapState.drag) { if (state.route.view === 'map') { mapState.pendingRender = true; return; } mapState.drag = null; mapState.pendingRender = false; } // never re-render mid-drag; leaving the map drops the drag
   appEl.dataset.state = 'in'; $('#landing').hidden = true; $('#shell').hidden = false;
   renderNav();
   const { view, id } = state.route;
@@ -612,8 +612,8 @@ async function saveMap(patch) {
 // farthest apart give the pace (miles a day) that turns "3,500 miles to go" into a date. With one reading the pace is a guess (~1,000 a month).
 function carReadings(id) {
   const a = store.assets[id]; if (!a) return []; const out = [];
-  if (a.odometer != null && a.odometer !== '') out.push({ miles: Number(a.odometer), on: a.odometerOn || (a.updated ? ymd(new Date(a.updated)) : today()) });
-  for (const l of list('log')) if (l.asset === id && l.mileage != null && l.mileage !== '' && l.date) out.push({ miles: Number(l.mileage), on: l.date });
+  if (a.odometer != null && a.odometer !== '' && parseDate(a.odometerOn)) out.push({ miles: Number(a.odometer), on: a.odometerOn }); // an undated reading cannot be placed, so it does not count
+  for (const l of list('log')) if (l.asset === id && l.mileage != null && l.mileage !== '' && parseDate(l.date)) out.push({ miles: Number(l.mileage), on: l.date });
   return out.filter(r => isFinite(r.miles) && r.miles > 0).sort((p, q) => p.on < q.on ? -1 : p.on > q.on ? 1 : p.miles - q.miles);
 }
 function odometerOf(id) {
@@ -621,7 +621,7 @@ function odometerOf(id) {
   const first = r[0], last = r[r.length - 1]; let perDay = 33, estimated = true;
   const days = daysBetween(first.on, last.on);
   if (days >= 30 && last.miles > first.miles) { perDay = Math.min(150, Math.max(5, (last.miles - first.miles) / days)); estimated = false; }
-  return { miles: last.miles, on: last.on, perDay, estimated, stale: -daysUntil(last.on) };
+  return { miles: last.miles, on: last.on, perDay, estimated, since: Math.max(0, -daysUntil(last.on)) }; // since: how old the reading is, in days
 }
 // When a task is due: by its date, by its mileage interval (projected onto the calendar with the car's pace), or whichever comes first.
 function dueInfo(s) {
@@ -632,14 +632,14 @@ function dueInfo(s) {
     const odo = s.asset ? odometerOf(s.asset) : null; i.odo = odo;
     if (!odo) i.needsOdometer = true;
     else if (s.lastMiles == null || s.lastMiles === '') i.needsBaseline = true;
-    else { i.milesLeft = Math.round(Number(s.lastMiles) + everyMiles - odo.miles); i.estDays = Math.round(i.milesLeft / odo.perDay); if (i.eff == null || i.estDays < i.eff) { i.eff = i.estDays; i.basis = 'miles'; } }
+    else { i.milesLeft = Math.round(Number(s.lastMiles) + everyMiles - odo.miles); i.estDays = Math.round(i.milesLeft / odo.perDay - odo.since); if (i.milesLeft < 0) i.estDays = Math.min(i.estDays, -1); if (i.eff == null || i.estDays < i.eff) { i.eff = i.estDays; i.basis = 'miles'; } } // the reading is as of its date; the car has kept driving since
   }
   return i;
 }
 // The short due label for a task and its colour class, like dueLabel but aware of mileage.
 function dueText(s) {
   const i = dueInfo(s);
-  if (i.basis === 'miles') { const cls = i.eff < 0 ? 'm over' : i.eff <= 30 ? 'm due' : 'm'; const est = i.milesLeft >= 0 && i.estDays <= 60 ? ` · ~${fmtDate(addDays(today(), i.estDays))}` : ''; return [i.milesLeft < 0 ? `${miles(-i.milesLeft)} mi over` : `in ${miles(i.milesLeft)} mi${est}`, cls]; }
+  if (i.basis === 'miles') { const cls = i.eff < 0 ? 'm over' : i.eff <= 30 ? 'm due' : 'm'; const est = i.milesLeft < 0 ? '' : i.estDays <= 0 ? ' · about now' : i.estDays <= 60 ? ` · ~${fmtDate(addDays(today(), i.estDays))}` : ''; return [i.milesLeft < 0 ? `${miles(-i.milesLeft)} mi over` : `in ${miles(i.milesLeft)} mi${est}`, cls]; }
   if (i.basis === 'date') return dueLabel(s.nextDue);
   if (i.needsOdometer) return ['needs odometer', 'm need'];
   if (i.needsBaseline) return ['set last done', 'm need'];
@@ -1091,6 +1091,7 @@ function bindMap() {
 
   svg.addEventListener('pointermove', e => {
     const p = pt(e); const d = mapState.drag;
+    if (d && e.pointerId !== d.pointerId) return; // a second finger does not steer the first one's drag
     if (d) {
       const dx = snap(p.x - d.start.x), dy = snap(p.y - d.start.y);
       if (d.type === 'room') d.el.setAttribute('transform', `translate(${dx},${dy})`);
@@ -1105,7 +1106,7 @@ function bindMap() {
   });
   svg.addEventListener('pointerleave', () => { if (!mapState.drag) tip.hidden = true; svg.querySelectorAll('.hov').forEach(m => m.classList.remove('hov')); mapState.hover = null; });
 
-  svg.addEventListener('pointercancel', () => { if (mapState.drag) { mapState.drag = null; render(); } });
+  svg.addEventListener('pointercancel', e => { if (mapState.drag && e.pointerId === mapState.drag.pointerId) { mapState.drag = null; render(); } });
   svg.addEventListener('pointerdown', e => {
     if (mapState.mode !== 'edit' || e.button !== 0 || mapState.drag) return;
     const p = pt(e);
@@ -1119,23 +1120,24 @@ function bindMap() {
     if (mapState.tool) { placeDoor(p, mapState.tool === 'wide' ? 120 : 36); return; }
     const handle = e.target.closest('[data-handle]'), marker = e.target.closest('[data-asset]'), rm = e.target.closest('[data-room]');
     e.preventDefault(); try { svg.setPointerCapture(e.pointerId); } catch {}
-    if (handle) mapState.drag = { type: 'resize', id: handle.dataset.handle, start: p, orig: { ...room(handle.dataset.handle) }, el: handle.closest('g') };
-    else if (marker) mapState.drag = { type: 'asset', id: marker.dataset.asset, start: p, orig: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) }, el: marker };
-    else if (rm) { mapState.selected = rm.dataset.room; mapState.drag = { type: 'room', id: rm.dataset.room, start: p, orig: { ...room(rm.dataset.room) }, el: rm }; }
-    else { const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); rect.setAttribute('class', 'drawing'); rect.setAttribute('rx', '8'); $('#scratch').append(rect); mapState.selected = null; mapState.drag = { type: 'draw', start: p, rect }; }
+    const pid = e.pointerId;
+    if (handle) mapState.drag = { type: 'resize', id: handle.dataset.handle, start: p, orig: { ...room(handle.dataset.handle) }, el: handle.closest('g'), pointerId: pid };
+    else if (marker) mapState.drag = { type: 'asset', id: marker.dataset.asset, start: p, orig: { x: Number(marker.dataset.x), y: Number(marker.dataset.y) }, el: marker, pointerId: pid };
+    else if (rm) { mapState.selected = rm.dataset.room; mapState.drag = { type: 'room', id: rm.dataset.room, start: p, orig: { ...room(rm.dataset.room) }, el: rm, pointerId: pid }; }
+    else { const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); rect.setAttribute('class', 'drawing'); rect.setAttribute('rx', '8'); $('#scratch').append(rect); mapState.selected = null; mapState.drag = { type: 'draw', start: p, rect, pointerId: pid }; }
   });
 
   svg.addEventListener('pointerup', async e => {
-    const d = mapState.drag; if (!d) return;
+    const d = mapState.drag; if (!d || e.pointerId !== d.pointerId) return;
     mapState.drag = null;
     const p = pt(e); const dx = snap(p.x - d.start.x), dy = snap(p.y - d.start.y);
-    const m = mapData();
+    const m = mapData(); const shared = (dr, r) => m.rooms.some(o => o.id !== r.id && o.floor === r.floor && o.kind !== 'outdoor' && onWall(dr, o)); // on another room's wall too (paved areas have no walls)
     if (d.type === 'room') {
       const old = m.rooms.find(r => r.id === d.id);
       if (old && (dx || dy)) {
         const nr = { ...old, x: clamp(old.x + dx, MAP_W - old.w), y: clamp(old.y + dy, MAP_H - old.h) }; const ddx = nr.x - old.x, ddy = nr.y - old.y;
-        // doors on this room's own walls move with it; a door shared with a neighbour that stays put stays on the neighbour's wall
-        const doors = m.doors.map(dr => dr.floor === old.floor && onWall(dr, old) && !m.rooms.some(o => o.id !== old.id && o.floor === old.floor && onWall(dr, o)) ? { ...dr, x: dr.x + ddx, y: dr.y + ddy } : dr);
+        // doors on this room's own walls move with it; a door shared with a neighbouring room that stays put stays on the neighbour's wall
+        const doors = m.doors.map(dr => dr.floor === old.floor && onWall(dr, old) && !shared(dr, old) ? { ...dr, x: dr.x + ddx, y: dr.y + ddy } : dr);
         await saveMap({ rooms: m.rooms.map(r => r.id === d.id ? nr : r), doors });
       } else render();
     }
@@ -1143,14 +1145,15 @@ function bindMap() {
       const old = m.rooms.find(r => r.id === d.id);
       if (old) {
         const nr = { ...old, w: Math.max(40, d.orig.w + dx), h: Math.max(40, d.orig.h + dy) };
-        const doors = m.doors.map(dr => { if (dr.floor !== old.floor) return dr; if (dr.dir === 'v' && dr.x === old.x + old.w && dr.y > old.y && dr.y < old.y + old.h) return { ...dr, x: nr.x + nr.w }; if (dr.dir === 'h' && dr.y === old.y + old.h && dr.x > old.x && dr.x < old.x + old.w) return { ...dr, y: nr.y + nr.h }; return dr; });
+        const doors = m.doors.map(dr => { if (dr.floor !== old.floor || shared(dr, old)) return dr; if (dr.dir === 'v' && dr.x === old.x + old.w && dr.y > old.y && dr.y < old.y + old.h) return { ...dr, x: nr.x + nr.w }; if (dr.dir === 'h' && dr.y === old.y + old.h && dr.x > old.x && dr.x < old.x + old.w) return { ...dr, y: nr.y + nr.h }; return dr; });
         await saveMap({ rooms: m.rooms.map(r => r.id === d.id ? nr : r), doors });
       } else render();
     }
     else if (d.type === 'asset') { const a = store.assets[d.id]; const pos = { floor: mapState.floor, x: clamp(snap(d.orig.x + dx), MAP_W), y: clamp(snap(d.orig.y + dy), MAP_H) }; if (dx || dy || a.map.room) await save('assets', { ...a, map: pos }); else render(); }
     else if (d.type === 'draw') {
       d.rect.remove();
-      const x = snap(Math.min(d.start.x, p.x)), y = snap(Math.min(d.start.y, p.y)), w = Math.abs(snap(p.x) - snap(d.start.x)), h = Math.abs(snap(p.y) - snap(d.start.y));
+      const cx = v => clamp(snap(v), MAP_W), cy = v => clamp(snap(v), MAP_H); // a drag that started in the margin still draws on the canvas
+      const x = Math.min(cx(d.start.x), cx(p.x)), y = Math.min(cy(d.start.y), cy(p.y)), w = Math.abs(cx(p.x) - cx(d.start.x)), h = Math.abs(cy(p.y) - cy(d.start.y));
       if (w >= 40 && h >= 40) { const r = { id: uid(), floor: mapState.floor, name: 'New room', x, y, w, h, color: m.rooms.length % 6 }; mapState.selected = r.id; saveMap({ rooms: [...m.rooms, r] }); const inp = $('#room-name'); if (inp) { inp.focus(); inp.select(); } }
       else render();
     }
@@ -1329,11 +1332,11 @@ function openEditor(coll, data = {}, presets = {}) {
     else if (f.t === 'room') { const cur = roomValue(data); input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${roomOptions(cur)}</select>`; }
     else if (f.t === 'facing') { const cur = (data.map && data.map.facing) || ''; input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${[['', 'Default (cars outdoors face the house)'], ['s', 'South: front toward you'], ['n', 'North: front toward the back of the map'], ['e', 'East: front to the right'], ['w', 'West: front to the left']].map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`; }
     else if (f.t === 'md') input = `<textarea id="${id}" name="${f.k}" spellcheck="true">${esc(v)}</textarea>`;
-    else input = `<input id="${id}" name="${f.k}" type="${f.t === 'md' ? 'text' : f.t}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} ${f.t === 'number' ? 'step="any" inputmode="decimal"' : ''}>`;
+    else input = `<input id="${id}" name="${f.k}" type="${f.t === 'md' ? 'text' : f.t}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} ${f.t === 'number' ? `step="any" inputmode="decimal"${f.min != null ? ` min="${f.min}"` : ''}` : ''}>`;
     return `<div class="field ${f.wide ? 'wide' : ''} ${f.car ? 'car-only' : ''}"><label for="${id}">${esc(f.l)}</label>${input}</div>`;
   }).join('');
   // mileage fields belong to cars: shown when the record's area is Car or its asset is one
-  const syncCar = () => { const ar = $('#f-area'), as = $('#f-asset'); const viaAsset = as && store.assets[as.value] && store.assets[as.value].area === 'Car'; fields.classList.toggle('car', !!(viaAsset || (ar && ar.value === 'Car'))); };
+  const syncCar = () => { const ar = $('#f-area'), as = $('#f-asset'); const viaAsset = as && store.assets[as.value] && store.assets[as.value].area === 'Car'; const holds = [...fields.querySelectorAll('.car-only input')].some(i => i.value !== ''); fields.classList.toggle('car', !!(viaAsset || (ar && ar.value === 'Car') || holds)); };
   fields.addEventListener('change', e => { if (e.target.id === 'f-area' || e.target.id === 'f-asset') syncCar(); }); syncCar();
   const dlg = $('#editor');
   dlg.dataset.coll = coll; dlg.dataset.id = data.id || '';
@@ -1349,10 +1352,10 @@ $('#editor-form').addEventListener('submit', async e => {
   e.preventDefault();
   const dlg = $('#editor'); const coll = dlg.dataset.coll; const s = SCHEMA[coll];
   const out = { ...(dlg._base || {}) };
-  const carOk = $('#editor-fields').classList.contains('car');
+  const carOk = $('#editor-fields').classList.contains('car') || s.fields.some(f => f.car && dlg._base && dlg._base[f.k] != null && dlg._base[f.k] !== '');
   for (const f of s.fields) {
     const el = $(`#f-${f.k}`); let v = el.value;
-    if (f.car && !carOk) continue; // hidden mileage fields keep whatever they had
+    if (f.car && !carOk) continue; // mileage fields that were never shown and never held anything stay untouched
     if (f.t === 'room') { if (v !== el.dataset.initial) { const [floor, ...rest] = v.split('|'); out.map = v ? { floor, room: rest.join('|'), ...(dlg._base.map && dlg._base.map.facing ? { facing: dlg._base.map.facing } : {}) } : null; } continue; }
     if (f.t === 'facing') { if (v !== el.dataset.initial) { const m = out.map !== undefined ? out.map : dlg._base.map; if (m) { out.map = { ...m }; if (v) out.map.facing = v; else delete out.map.facing; } } continue; }
     if (f.t === 'number') v = v === '' ? null : Number(v);
@@ -1360,6 +1363,7 @@ $('#editor-form').addEventListener('submit', async e => {
     out[f.k] = v === '' ? null : v;
   }
   if (coll === 'pages') { const wanted = dlg._base.slug || slugify(out.title); out.slug = wanted; const clash = list('pages').find(p => p.slug === wanted && p.id !== out.id); if (clash) out.slug = `${wanted}-${uid().slice(0, 4)}`; }
+  if (coll === 'assets' && out.odometer != null && !out.odometerOn) out.odometerOn = today(); // a reading needs a date to count
   if (coll === 'schedule' && out.unit === 'miles') { if (out.everyMiles == null) out.everyMiles = out.every; out.every = null; out.unit = 'months'; } // an old miles-only row becomes a mileage interval
   const after = dlg._after; dlg._after = null;
   dlg.close();
@@ -1402,26 +1406,30 @@ function openDoneSheet(s) {
 async function rollSchedule(s, entry) {
   const date = entry.date || today(); const next = { ...s, lastDone: date };
   next.nextDue = s.every && s.unit !== 'miles' ? addInterval(date, Number(s.every), s.unit || 'months') : null;
-  const mi = entry.mileage != null && entry.mileage !== '' ? Number(entry.mileage) : null;
-  if (mi != null) next.lastMiles = mi;
+  const mi = entry.mileage != null && entry.mileage !== '' && Number(entry.mileage) > 0 ? Number(entry.mileage) : null; // 0 is not a reading
+  const carId = entry.asset || s.asset; const sameCar = !entry.asset || entry.asset === s.asset;
+  if (mi != null && sameCar) next.lastMiles = mi; // a baseline only makes sense on the task's own car
   await save('schedule', next);
-  if (mi != null && s.asset) await bumpOdometer(s.asset, mi, date);
+  const warn = mi != null && carId ? await bumpOdometer(carId, mi, date) : '';
   const i = dueInfo(next);
-  toast(`Logged “${s.task}”${next.nextDue ? `, next due ${fmtDate(next.nextDue)}` : ''}${i.milesLeft != null ? `${next.nextDue ? ' or' : ', next'} in ${miles(i.milesLeft)} mi` : ''}`);
+  toast(`Logged “${s.task}”${next.nextDue ? `, next due ${fmtDate(next.nextDue)}` : ''}${i.milesLeft != null ? `${next.nextDue ? ' or' : ', next'} in ${miles(i.milesLeft)} mi` : ''}${warn ? `. ${warn}` : ''}`);
 }
-// A new odometer reading for a car; readings dated before the one already recorded are kept in the log but do not move the car's reading.
+// A new odometer reading. It moves the car's reading when it is the newest (same day: the higher one); an explicit update always does.
+// Returns a warning to show when the reading is lower than the latest known one and is not simply backdated.
 async function bumpOdometer(assetId, mi, date, force = false) {
-  const a = store.assets[assetId]; if (!a) return;
+  const a = store.assets[assetId]; if (!a) return '';
   const cur = odometerOf(assetId);
-  if (!force && a.odometer != null && a.odometerOn && a.odometerOn > date) return;
-  if (cur && mi < cur.miles && cur.on <= date) toast(`${miles(mi)} mi is lower than the last reading, ${miles(cur.miles)} mi on ${fmtDate(cur.on)}`);
+  const warn = cur && mi < cur.miles && date >= cur.on ? `${miles(mi)} mi is lower than the last reading, ${miles(cur.miles)} mi on ${fmtDate(cur.on)}` : '';
+  const stored = a.odometer != null && a.odometer !== '' && parseDate(a.odometerOn) ? { miles: Number(a.odometer), on: a.odometerOn } : null;
+  if (!force && stored && (stored.on > date || (stored.on === date && stored.miles > mi))) return warn;
   await save('assets', { ...a, odometer: mi, odometerOn: date });
+  return warn;
 }
 document.addEventListener('submit', async e => {
   const f = e.target.closest('form[data-odo]'); if (!f) return;
   e.preventDefault(); const inp = f.querySelector('input'); const v = Math.round(Number(inp.value));
   if (!isFinite(v) || v <= 0) { inp.focus(); return; }
-  await bumpOdometer(f.dataset.odo, v, today(), true); toast(`Odometer: ${miles(v)} mi`);
+  const warn = await bumpOdometer(f.dataset.odo, v, today(), true); toast(`Odometer: ${miles(v)} mi${warn ? `. ${warn}` : ''}`);
 });
 async function toggleTodo(id) {
   const t = store.todos[id]; if (!t) return;
