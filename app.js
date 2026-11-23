@@ -1,9 +1,9 @@
 // Home Base: a private logbook for the house, the cars and the projects.
 // Single-page app. Data lives in Firestore under users/{uid}/{collection}/{id}, synced live.
 
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
-import { initializeFirestore, getFirestore, persistentLocalCache, collection, doc, getDoc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js';
+import { initializeFirestore, getFirestore, persistentLocalCache, collection, doc, getDoc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyAw57oCNI8tpI6Lqs7KdoyvI_MGPZDFnYY",
@@ -165,10 +165,22 @@ async function signIn() {
   catch (e) {
     const code = e && e.code || '';
     if (/popup-blocked|popup-closed|cancelled-popup|operation-not-supported/.test(code)) {
+      try { sessionStorage.setItem('hb-redirect', '1'); } catch {}
       try { await signInWithRedirect(auth, provider); } catch (e2) { msg.textContent = `Sign-in failed (${e2.code || e2.message}).`; msg.hidden = false; }
     } else { msg.textContent = `Sign-in failed (${code || e.message}).`; msg.hidden = false; }
   }
 }
+
+// Back from a redirect sign-in with no account: the browser kept the result from the page (Safari on iPhone does this when the
+// auth domain is another site), so say what happened instead of sitting on the sign-in page in silence.
+(async () => {
+  let pending = false;
+  try { pending = sessionStorage.getItem('hb-redirect') === '1'; sessionStorage.removeItem('hb-redirect'); } catch {}
+  if (!pending) return;
+  const msg = $('#landing-msg');
+  try { const r = await getRedirectResult(auth); if (!r && !auth.currentUser) { msg.textContent = "Sign-in didn't finish in this browser. Try again, or open Home Base in Chrome; Safari on iPhone sometimes drops the step that hands the sign-in back to the page."; msg.hidden = false; } }
+  catch (e) { msg.textContent = `Sign-in failed (${e.code || e.message}).`; msg.hidden = false; }
+})();
 
 onAuthStateChanged(auth, async user => {
   state.user = user; state.owner = null; state.ready = false;
