@@ -383,7 +383,11 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .map-card .tip-list li > span:first-child { flex: 1; min-width: 0; }
 .tip-list .need { color: var(--amber); }
 .map-card .link { font-size: inherit; }
-@media (max-width: 760px) { .map-card { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 60%; } }
+/* on a phone the drawing is small, so the card sits under it instead of covering it; the title block steps aside while a card is open */
+@media (max-width: 760px) {
+  .map-card { position: relative; top: auto; bottom: auto; left: auto; right: auto; width: auto; max-height: none; margin: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+  .map-wrap:has(.map-card:not([hidden])) .sheet-title { display: none; }
+}
 .map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; width: 260px; font-size: 13px; }
 .tip-head { display: flex; align-items: center; gap: 10px; }
 .tip-head .glyph { font-size: 22px; }
