@@ -310,7 +310,9 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .obj.ok .pad { fill: var(--bp-ok); stroke: var(--bp-ok); } .obj.soon .pad { fill: var(--bp-soon); stroke: var(--bp-soon); } .obj.over .pad { fill: var(--bp-over); stroke: var(--bp-over); animation: padpulse 1.6s ease-in-out infinite; } .obj.todo .pad { fill: var(--bp-todo); stroke: var(--bp-todo); }
 .obj:hover .pad, .obj.lit .pad, .obj.hov .pad { stroke-width: 3; fill-opacity: .32; stroke-dasharray: none; }
 @keyframes padpulse { 50% { fill-opacity: .4; } }
-.obj .cabin .fx, .obj .cabin .fy { fill: #4e6a8e; } .obj .cabin .ft { fill: #f7fafc; }
+.obj .cabin { fill: #4e6a8e; } .obj .cabin.fy { fill: #43607f; } .obj .cabin.roof { fill: #f7fafc; }
+.obj .body.ft { fill: var(--model-top); } .obj .body.fx { fill: var(--model-x); } .obj .body.fy { fill: var(--model-y); }
+.obj .tail { fill: #e0524f; stroke: #8c2b2b; stroke-width: .8; }
 .obj .wheel { fill: #1a2838; stroke: #6b82a0; stroke-width: 1.5; }
 .obj .lamp { fill: #fff3c4; stroke: #c9b98a; stroke-width: .8; }
 .obj .seam { stroke: #7d93ae; stroke-width: 1.2; }

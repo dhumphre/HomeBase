@@ -489,13 +489,13 @@ function resolvePlaced(floorId) {
   for (const a of list('assets')) {
     if (!a.map || a.map.floor !== floorId) continue;
     if (a.map.room) { if (!byRoom.has(a.map.room)) byRoom.set(a.map.room, []); byRoom.get(a.map.room).push(a); }
-    else if (a.map.x != null) out.push({ a, shape: assetShape(a), x: a.map.x, y: a.map.y, auto: false });
+    else if (a.map.x != null) out.push({ a, shape: assetShape(a, roomAt(a.map)), x: a.map.x, y: a.map.y, auto: false });
   }
   for (const [k, items] of byRoom) {
     const group = groups.get(k);
     if (!group) { items.forEach(a => out.push({ a, shape: assetShape(a), x: null, y: null, auto: true, lost: true })); continue; }
     const pieces = [...group].sort((p, q) => q.w * q.h - p.w * p.h); const gap = 8, pad = 10;
-    const queue = items.map(a => ({ a, shape: assetShape(a) })).sort((p, q) => q.shape.w * q.shape.d - p.shape.w * p.shape.d || String(p.a.name).localeCompare(String(q.a.name)));
+    const queue = items.map(a => ({ a, shape: assetShape(a, pieces[0]) })).sort((p, q) => q.shape.w * q.shape.d - p.shape.w * p.shape.d || String(p.a.name).localeCompare(String(q.a.name)));
     let i = 0;
     for (const r of pieces) {
       let cx = r.x + pad, cy = r.y + pad, rowH = 0;
@@ -558,7 +558,13 @@ const SHAPES = [
   [/panel|breaker/i, { kind: 'box', w: 1.4, d: 0.6, h: 3.2 }],
   [/bulb|spare|filter|box of|\bbin\b|supplies|parts|kit/i, { kind: 'bin', w: 1.6, d: 1.6, h: 1.2 }],
 ];
-function assetShape(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; let sh = null; for (const [re, x] of SHAPES) if (re.test(t)) { sh = x; break; } if (!sh) sh = a.area === 'Car' ? SHAPES[1][1] : { kind: 'box', w: 2.2, d: 2.2, h: 2.4 }; return { ...sh, w: ft(sh.w), d: ft(sh.d), h: ft(sh.h), icon: assetIcon(a) }; }
+function assetShape(a, room = null) {
+  const t = `${a.name} ${a.type || ''} ${a.make || ''}`; let sh = null; for (const [re, x] of SHAPES) if (re.test(t)) { sh = x; break; }
+  if (!sh) sh = a.area === 'Car' ? SHAPES[1][1] : { kind: 'box', w: 2.2, d: 2.2, h: 2.4 };
+  // facing: the way the nose points (n = toward the back of the map, s = toward the viewer, e, w); parked outdoors a car faces the house
+  const facing = (a.map && a.map.facing) || (room && room.kind === 'outdoor' ? 'n' : 's'); const across = facing === 'e' || facing === 'w';
+  return { ...sh, w: ft(across ? sh.d : sh.w), d: ft(across ? sh.w : sh.d), h: ft(sh.h), facing, icon: assetIcon(a) };
+}
 
 // Rooms with the same name on a floor join into one shape: shared color, no wall along their seams, one label.
 const roomKey = r => (r.name || '').trim().toLowerCase();
@@ -795,6 +801,29 @@ function isoDoor(d, wall) {
   const leaf = h ? isoBox(jx - 1.5, jy, jx + 1.5, jy + d.w, H, 'leaf') : isoBox(jx, jy - 1.5, jx + d.w, jy + 1.5, H, 'leaf');
   return { floor, leaf: `<g class="door iso" data-door="${d.id}">${leaf}</g>`, depth: h ? jx + jy + d.w / 2 : jx + d.w / 2 + jy };
 }
+// A car built in its own frame (u across, v along the body, nose at +v), turned to face shape.facing. Faces are drawn only when they look toward the camera.
+function carModel(shape, cx, cy, z0) {
+  const across = shape.facing === 'e' || shape.facing === 'w'; const w = across ? shape.d : shape.w, d = across ? shape.w : shape.d, h = shape.h, tall = shape.tall;
+  const clear = ft(0.8), roof = clear + ft(2.2), ins = w * 0.1, wr = ft(1.05);
+  const u0 = -w / 2, u1 = w / 2, v0 = -d / 2, v1 = d / 2; const faces = [];
+  const box = (a0, b0, a1, b1, zA, zB, cls) => { faces.push({ cls, n: [0, 0, 1], pts: [[a0, b0, zB], [a1, b0, zB], [a1, b1, zB], [a0, b1, zB]] }, { cls, n: [1, 0, 0], pts: [[a1, b0, zA], [a1, b1, zA], [a1, b1, zB], [a1, b0, zB]] }, { cls, n: [-1, 0, 0], pts: [[a0, b0, zA], [a0, b1, zA], [a0, b1, zB], [a0, b0, zB]] }, { cls, n: [0, 1, 0], pts: [[a0, b1, zA], [a1, b1, zA], [a1, b1, zB], [a0, b1, zB]] }, { cls, n: [0, -1, 0], pts: [[a0, b0, zA], [a1, b0, zA], [a1, b0, zB], [a0, b0, zB]] }); };
+  box(u0, v0, u1, v1, clear, roof, 'body');
+  for (const side of [-1, 1]) for (const vv of [v0 + d * 0.2, v1 - d * 0.2]) { const pts = []; for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2; pts.push([side * (w / 2 + 1), vv + wr * Math.cos(t), wr + wr * Math.sin(t)]); } faces.push({ cls: 'wheel', n: [side, 0, 0], pts }); }
+  const c0 = u0 + ins, c1 = u1 - ins, cv0 = v0 + (tall ? d * 0.1 : d * 0.24), cv1 = v1 - d * 0.3, rake = d * 0.1, back = tall ? d * 0.04 : d * 0.08;
+  faces.push({ cls: 'cabin', n: [1, 0, 0], pts: [[c1, cv0, roof], [c1, cv1, roof], [c1, cv1 - rake, h], [c1, cv0 + back, h]] }, { cls: 'cabin', n: [-1, 0, 0], pts: [[c0, cv0, roof], [c0, cv1, roof], [c0, cv1 - rake, h], [c0, cv0 + back, h]] },
+    { cls: 'cabin', n: [0, 1, 0], pts: [[c0, cv1, roof], [c1, cv1, roof], [c1, cv1 - rake, h], [c0, cv1 - rake, h]] }, { cls: 'cabin', n: [0, -1, 0], pts: [[c0, cv0, roof], [c1, cv0, roof], [c1, cv0 + back, h], [c0, cv0 + back, h]] },
+    { cls: 'cabin roof', n: [0, 0, 1], pts: [[c0, cv0 + back, h], [c1, cv0 + back, h], [c1, cv1 - rake, h], [c0, cv1 - rake, h]] });
+  for (const hu of [u0 + w * 0.12, u1 - w * 0.12]) { const lo = clear + ft(1.1), hi = clear + ft(1.6), r = w * 0.09; faces.push({ cls: 'lamp', n: [0, 1, 0], pts: [[hu - r, v1 + 0.5, lo], [hu + r, v1 + 0.5, lo], [hu + r, v1 + 0.5, hi], [hu - r, v1 + 0.5, hi]] }, { cls: 'tail', n: [0, -1, 0], pts: [[hu - r, v0 - 0.5, lo], [hu + r, v0 - 0.5, lo], [hu + r, v0 - 0.5, hi], [hu - r, v0 - 0.5, hi]] }); }
+  const turn = { s: (u, v) => [u, v], n: (u, v) => [-u, -v], e: (u, v) => [v, -u], w: (u, v) => [-v, u] }[shape.facing] || ((u, v) => [u, v]);
+  let out = '';
+  for (const f of faces) {
+    const [nx, ny] = turn(f.n[0], f.n[1]); const nz = f.n[2];
+    if (!(nz > 0 || nx + ny > 0)) continue;
+    const shade = nz > 0 ? 'ft' : nx > 0 ? 'fx' : 'fy';
+    out += `<polygon class="${f.cls} ${shade}" points="${isoPts(f.pts.map(([u, v, z]) => { const [dx, dy] = turn(u, v); return isoP(cx + dx, cy + dy, z0 + z); }))}"/>`;
+  }
+  return out;
+}
 // Draw one component as a small model to scale, standing at (x, y) with its base at height z0: a car, an appliance, a tank, or a plain crate with its glyph.
 function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
   const st = assetStatus(a.id); const { kind, w, d, h } = shape;
@@ -805,17 +834,8 @@ function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
   const cyl = (cx, cy, r, hh, cls) => { const N = 14; let out = ''; const top = []; for (let i = 0; i < N; i++) { const t0 = i / N * 2 * Math.PI, t1 = (i + 1) / N * 2 * Math.PI; const nx = Math.cos((t0 + t1) / 2), ny = Math.sin((t0 + t1) / 2); top.push(isoP(cx + r * Math.cos(t0), cy + r * Math.sin(t0), z0 + hh)); if (nx + ny > 0) { const p0 = [cx + r * Math.cos(t0), cy + r * Math.sin(t0)], p1 = [cx + r * Math.cos(t1), cy + r * Math.sin(t1)]; out += `<polygon style="fill:color-mix(in srgb, var(--model-x) ${Math.round((nx + 1) * 50)}%, var(--model-y))" points="${isoPts([isoP(p0[0], p0[1], z0), isoP(p1[0], p1[1], z0), isoP(p1[0], p1[1], z0 + hh), isoP(p0[0], p0[1], z0 + hh)])}"/>`; } } return `<g class="${cls}">${out}<polygon class="ft" points="${isoPts(top)}"/></g>`; };
   const glyph = (size, z) => { const G = isoP(x, y, z0 + z); return `<text class="glyph" x="${f1(G.X)}" y="${f1(G.Y + size * 0.36)}" text-anchor="middle" font-size="${size}">${shape.icon}</text>`; };
   let parts = '';
-  if (kind === 'car') {
-    const clear = ft(0.8), roof = clear + ft(2.2), wr = ft(1.05), ins = w * 0.1;
-    parts += B(x0, y0, x1, y1, clear, roof, 'body');
-    parts += ring(x1 + 1, y0 + d * 0.2, wr, wr, 'wheel', 'x') + ring(x1 + 1, y1 - d * 0.2, wr, wr, 'wheel', 'x');
-    // the cabin: a prism with a raked windshield at the front (+y) and a sloped rear window
-    const cx0 = x0 + ins, cx1 = x1 - ins, cy0 = y0 + d * 0.3, cy1 = shape.tall ? y1 - d * 0.1 : y1 - d * 0.24, rake = d * 0.1, back = shape.tall ? d * 0.04 : d * 0.08;
-    const P = (px, py, pz) => isoP(px, py, z0 + pz);
-    parts += `<g class="cabin"><polygon class="fx" points="${isoPts([P(cx1, cy0, roof), P(cx1, cy1, roof), P(cx1, cy1 - rake, h), P(cx1, cy0 + back, h)])}"/><polygon class="fy" points="${isoPts([P(cx0, cy1, roof), P(cx1, cy1, roof), P(cx1, cy1 - rake, h), P(cx0, cy1 - rake, h)])}"/><polygon class="ft" points="${isoPts([P(cx0, cy0 + back, h), P(cx1, cy0 + back, h), P(cx1, cy1 - rake, h), P(cx0, cy1 - rake, h)])}"/></g>`;
-    for (const hx of [x0 + w * 0.12, x1 - w * 0.12]) parts += `<polygon class="lamp" points="${isoPts([P(hx - w * 0.09, y1 + 0.5, clear + ft(1.1)), P(hx + w * 0.09, y1 + 0.5, clear + ft(1.1)), P(hx + w * 0.09, y1 + 0.5, clear + ft(1.6)), P(hx - w * 0.09, y1 + 0.5, clear + ft(1.6))])}"/>`;
-    parts += `<line class="seam" x1="${f1(isoP(x0 + 3, y1 + 0.5, z0 + clear + ft(1.4)).X)}" y1="${f1(isoP(x0 + 3, y1 + 0.5, z0 + clear + ft(1.4)).Y)}" x2="${f1(isoP(x1 - 3, y1 + 0.5, z0 + clear + ft(1.4)).X)}" y2="${f1(isoP(x1 - 3, y1 + 0.5, z0 + clear + ft(1.4)).Y)}"/>`;
-  } else if (kind === 'washer' || kind === 'dryer') {
+  if (kind === 'car') parts += carModel(shape, x, y, z0);
+  else if (kind === 'washer' || kind === 'dryer') {
     parts += B(x0, y0, x1, y1, 0, h, 'appliance') + B(x0, y0, x1, y0 + d * 0.2, h, h + ft(0.3), 'strip') + ring(x, y1 + 0.5, w * (kind === 'washer' ? 0.3 : 0.26), h * 0.45, 'port', 'y');
   } else if (kind === 'fridge') {
     const z = z0 + h * 0.64; const L = isoP(x0, y1 + 0.5, z), R = isoP(x1, y1 + 0.5, z);

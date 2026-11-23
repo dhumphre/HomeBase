@@ -13,7 +13,7 @@
 //   node tools/hb.mjs todo "<name>" [--asset <name>] [--due YYYY-MM-DD] [--priority high] [--notes "..."]
 //   node tools/hb.mjs asset "<name>" [--area House] [--type "Water heater"] [--make Rheem] [--year 2019] [--specs "..."] [--room Garage]
 //   node tools/hb.mjs schedule "<task>" --asset <name> --every 6 --unit months [--next YYYY-MM-DD] [--notes "..."]
-//   node tools/hb.mjs place <asset> <room>           put a component in a room on the map
+//   node tools/hb.mjs place <asset> <room> [--facing n|s|e|w]   put a component in a room on the map (facing: which way a car points; outdoors n = toward the house)
 //   node tools/hb.mjs room "<name>" --x 820 --y 350 --w 200 --h 250 [--color 0-5] [--outdoor]   add a room piece (about 11 units per foot)
 //   node tools/hb.mjs rmroom <name or id>            remove a room (every piece of that name)
 //   node tools/hb.mjs door --x 880 --y 340 --dir h [--w 36|120]   a door (w 120 = wide opening / garage door) on a wall at that point
@@ -43,7 +43,7 @@ try {
     case 'todo': { const d = await hb.addTodo({ name: rest[0], asset: opt.asset, due: opt.due, priority: opt.priority, status: opt.status, area: opt.area, notes: opt.notes }); console.log(`Added to-do "${d.name}" (${d.id})`); break; }
     case 'asset': { const d = await hb.addAsset({ name: rest[0], ...opt }); console.log(`Added asset "${d.name}" (${d.id})${d.placedIn ? ` in ${d.placedIn}` : opt.room ? ` (no room named "${opt.room}", left unplaced)` : ''}`); break; }
     case 'schedule': { const d = await hb.addSchedule({ task: rest[0], asset: opt.asset, every: opt.every, unit: opt.unit, nextDue: opt.next, lastDone: opt.last, season: opt.season, area: opt.area, notes: opt.notes }); console.log(`Scheduled "${d.task}" every ${d.every} ${d.unit}${d.nextDue ? `, next ${d.nextDue}` : ''} (${d.id})`); break; }
-    case 'place': { const r = await hb.place(rest[0], rest[1]); console.log(`${r.asset} placed in ${r.room}`); break; }
+    case 'place': { const r = await hb.place(rest[0], rest[1], opt.facing); console.log(`${r.asset} placed in ${r.room}${r.facing ? ` facing ${r.facing}` : ''}`); break; }
     case 'room': { const r = await hb.addRoom({ name: rest[0], x: opt.x, y: opt.y, w: opt.w, h: opt.h, color: opt.color, kind: opt.outdoor ? 'outdoor' : undefined, floor: opt.floor }); console.log(`Added ${r.kind === 'outdoor' ? 'outdoor area' : 'room'} "${r.name}" at ${r.x},${r.y} ${r.w}x${r.h} (${r.id})`); break; }
     case 'rmroom': { const gone = await hb.removeRoom(rest[0]); console.log(`Removed ${gone.length} piece${gone.length > 1 ? 's' : ''} of ${gone[0].name}`); break; }
     case 'door': { const d = await hb.addDoor({ x: opt.x, y: opt.y, dir: opt.dir, w: opt.w, floor: opt.floor }); console.log(`Added ${d.w >= 80 ? 'wide opening' : 'door'} at ${d.x},${d.y} (${d.id})`); break; }

@@ -112,10 +112,12 @@ export async function addAsset({ name, area, type, make, serial, year, purchased
   const doc = await create('assets', { name, area: area || 'House', type: type || null, make: make || null, serial: serial || null, year: num(year), purchased: purchased || null, specs: specs || null, contact: contact || null, manual: manual || null, notes: notes || '', map });
   return { ...doc, placedIn };
 }
-export async function place(assetQ, room) {
+// facing (optional): which way a car or other long object points: n (toward the back of the map), s (toward the viewer), e, w. Outdoors a car faces n by default.
+export async function place(assetQ, room, facing) {
   const a = await find('assets', assetQ); const m = await layout();
   const ref = roomRef(m.rooms || [], room); if (!ref) throw new Error(`No room named "${room}" on the map. Rooms: ${[...new Set((m.rooms || []).map(r => r.name))].join(', ')}`);
-  await coll('assets').doc(a.id).update({ map: ref, updated: Date.now() }); return { asset: a.name, room, floor: ref.floor }; // update() replaces the map field; set-merge would keep old x,y
+  if (facing && !['n', 's', 'e', 'w'].includes(facing)) throw new Error('facing must be n, s, e or w'); if (facing) ref.facing = facing;
+  await coll('assets').doc(a.id).update({ map: ref, updated: Date.now() }); return { asset: a.name, room, floor: ref.floor, facing: facing || null }; // update() replaces the map field; set-merge would keep old x,y
 }
 export async function saveLayout(patch) { await init(); const m = await layout(); const next = { ...m, ...patch, id: 'layout', updated: Date.now() }; await mapRef().set(next); return next; }
 // A room piece: same-named pieces join into one room; kind 'outdoor' is paved ground with no walls (driveway, patio). Units: about 11 per foot.
