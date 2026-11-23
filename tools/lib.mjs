@@ -137,6 +137,7 @@ export async function addDoor({ x, y, dir, w, floor }) {
   const m = await layout(); const d = { id: uid(), floor: floor || (m.floors && m.floors[0] ? m.floors[0].id : 'main'), x: Number(x), y: Number(y), dir: dir === 'v' ? 'v' : 'h', w: Number(w) || 36 };
   await saveLayout({ doors: [...(m.doors || []), d] }); return d;
 }
+export async function removeDoor(id) { const m = await layout(); const d = (m.doors || []).find(d => d.id === id); if (!d) throw new Error(`No door ${id}`); await saveLayout({ doors: m.doors.filter(x => x.id !== id) }); return d; }
 export async function mapSummary() {
   const m = await layout(); const assets = await all('assets'); const floors = m.floors || [{ id: 'main', name: 'Main floor' }];
   return { floors: floors.map(f => ({ ...f, rooms: (m.rooms || []).filter(r => r.floor === f.id).map(r => ({ id: r.id, name: r.name, x: r.x, y: r.y, w: r.w, h: r.h, color: r.color ?? 0 })), doors: (m.doors || []).filter(d => d.floor === f.id), assets: assets.filter(a => a.map && a.map.floor === f.id).map(a => ({ id: a.id, name: a.name, room: a.map.room || ((m.rooms || []).find(r => r.floor === f.id && a.map.x >= r.x && a.map.x <= r.x + r.w && a.map.y >= r.y && a.map.y <= r.y + r.h) || {}).name || null, pinned: a.map.x != null ? [a.map.x, a.map.y] : null })) })), unplaced: assets.filter(a => !a.map).map(a => a.name) };
