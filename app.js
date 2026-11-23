@@ -263,6 +263,7 @@ function home() {
   return `
     ${head('Home Base', { eyebrow: new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), actions: btn('+ Log work', 'new', 'data-coll="log"', 'btn primary small') + btn('+ To-do', 'new', 'data-coll="todos"') })}
     ${empty && state.ready ? `<div class="callout"><p><b>Fresh start.</b> Add starter content to get a typical house schedule, your three current projects and a how-to page, or begin from a blank slate.</p>${btn('Add starter content', 'seed', '', 'btn primary small')}</div>` : ''}
+    ${homeModel()}
     <div class="tiles">
       <div class="tile ${overdue ? 'warn' : ''}"><div class="n">${overdue}</div><div class="l">overdue</div></div>
       <div class="tile ${due.length - overdue ? 'soon' : ''}"><div class="n">${due.length - overdue}</div><div class="l">due in 30 days</div></div>
@@ -285,6 +286,21 @@ function home() {
       <section class="card"><header><h2>Recently edited pages</h2><a class="more" href="#/pages">all</a></header>
         ${pages.length ? `<ul class="rows">${pages.map(p => `<li><a class="t" href="#/pages/${p.slug}">${esc(p.title)}</a>${chip(p.area)}<span class="m">${new Date(p.updated).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></li>`).join('')}</ul>` : `<div class="empty">No pages yet. Pages are free-form notes: a house overview, a car's quirks, a contractor list.</div>`}
       </section>
+    </div>`;
+}
+
+// The house on the Home page: the same model as the map, smaller and quiet (no callouts), its pads coloured by status.
+// Clicking a component opens the map with that component selected; clicking a room name frames the room; anywhere else opens the map.
+function homeModel() {
+  const m = mapData(); const floor = m.floors.find(f => f.id === mapState.floor) || m.floors[0]; const rooms = m.rooms.filter(r => r.floor === floor.id);
+  if (!rooms.length) return '';
+  const doors = m.doors.filter(d => d.floor === floor.id); const placed = resolvePlaced(floor.id).filter(p => !p.lost); placed.forEach((p, i) => { p.n = i + 1; });
+  const summary = roomSummary(placed, rooms); const counts = { over: 0, soon: 0, todo: 0, need: 0 };
+  for (const p of placed) { const st = assetStatusDeep(p.a.id); if (counts[st.cls] != null) counts[st.cls]++; if (st.needs) counts.need++; }
+  const line = [counts.over ? `${counts.over} overdue` : '', counts.soon ? `${counts.soon} due soon` : '', counts.todo ? `${counts.todo} with to-dos` : '', counts.need ? `${counts.need} need${counts.need > 1 ? '' : 's'} a reading` : ''].filter(Boolean).join(' · ') || 'all quiet';
+  return `<div class="map-wrap iso mini home-model" data-action="home-map" role="link" tabindex="0" aria-label="Open the map">
+      ${isoSvg(rooms, doors, placed, m.bg[floor.id], summary, { id: 'home-svg', mini: true })}
+      <div class="sheet-title"><b>${esc(floor.name)}</b><span>${placed.length} component${placed.length === 1 ? '' : 's'} · ${esc(line)}</span><span>Click to open the map</span></div>
     </div>`;
 }
 
@@ -838,14 +854,15 @@ function wallPieces(rooms, doors) {
 }
 const wallAt = (pieces, d) => pieces.find(p => p.horiz ? d.dir === 'h' && p.y0 === d.y && d.x >= p.x0 - d.w && d.x <= p.x1 + d.w : d.dir === 'v' && p.x0 === d.x && d.y >= p.y0 - d.w && d.y <= p.y1 + d.w);
 // Floors and slab first, then walls, door leaves and components sorted by depth, labels and callouts on top.
-function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
+function isoSvg(rooms, doors, placed, bgData, summary = new Map(), opts = {}) {
+  const svgId = opts.id || 'map-svg', sfx = svgId === 'map-svg' ? '' : `-${svgId}`; // defs ids must be unique when two drawings share a page
   const xs = [...rooms.flatMap(r => [r.x, r.x + r.w]), ...placed.map(p => p.x)], ys = [...rooms.flatMap(r => [r.y, r.y + r.h]), ...placed.map(p => p.y)];
   const has = xs.length > 0;
   const gx0 = has ? Math.min(...xs) - 140 : 0, gy0 = has ? Math.min(...ys) - 140 : 0, gx1 = has ? Math.max(...xs) + 140 : MAP_W, gy1 = has ? Math.max(...ys) + 140 : MAP_H;
   const all = [];
   for (const r of rooms) all.push(isoP(r.x, r.y, ISO_H), isoP(r.x + r.w, r.y, ISO_H), isoP(r.x, r.y + r.h, -SLAB - 16), isoP(r.x + r.w, r.y + r.h, -SLAB - 16), isoP(r.x + r.w, r.y), isoP(r.x, r.y + r.h));
   const indoor = rooms.filter(r => r.kind !== 'outdoor');
-  for (const p of placed) { p.z0 = baseZOf(p); const { w, d, h } = p.shape; all.push(isoP(p.x - w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y - d / 2, p.z0 + h + 40)); const T = isoP(p.x, p.y, p.z0 + h + 200); all.push(T, { X: T.X + 36 + shortName(p.a.name, 20).length * 9.2, Y: T.Y }); }
+  for (const p of placed) { p.z0 = baseZOf(p); const { w, d, h } = p.shape; all.push(isoP(p.x - w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y - d / 2, p.z0 + h + 40)); if (!opts.mini) { const T = isoP(p.x, p.y, p.z0 + h + 200); all.push(T, { X: T.X + 36 + shortName(p.a.name, 20).length * 9.2, Y: T.Y }); } }
   if (!all.length) all.push(isoP(gx0, gy0), isoP(gx1, gy0), isoP(gx1, gy1), isoP(gx0, gy1));
   const minX = Math.min(...all.map(p => p.X)) - 36, maxX = Math.max(...all.map(p => p.X)) + 36, minY = Math.min(...all.map(p => p.Y)) - 36, maxY = Math.max(...all.map(p => p.Y)) + 36;
 
@@ -879,26 +896,26 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
   }
   for (const d of doors) { const { floor, leaf, depth } = isoDoor(d, wallAt(pieces, d)); flat.push(floor); if (leaf) ents.push({ d: depth, k: 0.5, html: leaf }); }
   // callouts: back to front, each takes the lowest height above its object whose label does not cover another label
-  for (const p of placed.slice().sort((a, b) => a.x + a.y - b.x - b.y)) {
+  for (const p of opts.mini ? [] : placed.slice().sort((a, b) => a.x + a.y - b.x - b.y)) {
     const w = (shortName(p.a.name, 20).length + (parts(p.a.id).length ? 3 : 0)) * 9.2 + 34;
     const top = p.shape.h + (p.shape.kind === 'console' && parts(p.a.id).some(c => assetShape(c).kind === 'tv') ? ft(3.2) : 0);
     p.up = claim([40, 68, 96, 124, 152, 180], up => { const T = isoP(p.x, p.y, p.z0 + top + up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
   }
-  for (const p of placed) { const m = isoObject(p); ents.push({ d: p.x + p.y, k: 1, html: m.body }); labels.push(m.callout); }
+  for (const p of placed) { const m = isoObject(p); ents.push({ d: p.x + p.y, k: 1, html: m.body }); if (!opts.mini) labels.push(m.callout); }
   ents.sort((p, q) => p.d - q.d || p.k - q.k);
-  return `<svg id="map-svg" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  return `<svg id="${svgId}" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
-        <pattern id="grid" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern>
-        <pattern id="grid2" width="${SNAP * 10}" height="${SNAP * 10}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 10} 0 L 0 0 0 ${SNAP * 10}" class="gridline major"/></pattern>
-        <radialGradient id="fade"><stop offset="35%" stop-color="#fff"/><stop offset="100%" stop-color="#000"/></radialGradient>
-        <mask id="gmask"><rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#fade)"/></mask>
-        <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
+        <pattern id="grid${sfx}" width="${SNAP * 5}" height="${SNAP * 5}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 5} 0 L 0 0 0 ${SNAP * 5}" class="gridline"/></pattern>
+        <pattern id="grid2${sfx}" width="${SNAP * 10}" height="${SNAP * 10}" patternUnits="userSpaceOnUse"><path d="M ${SNAP * 10} 0 L 0 0 0 ${SNAP * 10}" class="gridline major"/></pattern>
+        <radialGradient id="fade${sfx}"><stop offset="35%" stop-color="#fff"/><stop offset="100%" stop-color="#000"/></radialGradient>
+        <mask id="gmask${sfx}"><rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#fade${sfx})"/></mask>
+        <filter id="soft${sfx}" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
       </defs>
-      <g transform="matrix(0.866,0.5,-0.866,0.5,0,0)" mask="url(#gmask)">
+      <g transform="matrix(0.866,0.5,-0.866,0.5,0,0)" mask="url(#gmask${sfx})">
         ${bgData ? `<image href="${bgData}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : ''}
-        <rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#grid)"/><rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#grid2)"/>
+        <rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#grid${sfx})"/><rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#grid2${sfx})"/>
       </g>
-      ${ground.join('')}<g class="shadow" filter="url(#soft)">${shadows.join('')}</g>
+      ${ground.join('')}<g class="shadow" filter="url(#soft${sfx})">${shadows.join('')}</g>
       <g class="slab">${slab.join('')}</g>
       ${floors.join('')}${flat.join('')}${ents.map(e => e.html).join('')}${labels.join('')}
     </svg>`;
@@ -1136,6 +1153,7 @@ function bindMap() {
   });
   svg.addEventListener('dblclick', e => { if (mapState.mode !== 'view') return; const rm = e.target.closest('[data-room]'); const r = rm && mapData().rooms.find(x => x.id === rm.dataset.room); if (r) focusRoom(svg, wrap, roomKey(r)); else setCam(svg, wrap, null); });
   if (mapState.focus) { const k = mapState.focus; mapState.focus = null; focusRoom(svg, wrap, k, false); }
+  if (mapState.focusAsset) { const id = mapState.focusAsset; mapState.focusAsset = null; const a = store.assets[id]; if (a) focusAsset(svg, wrap, (hostOf(a) || a).id, false); }
   // hovering a row in the side list lights its marker
   wrap.parentElement.addEventListener('pointerover', e => { const li = e.target.closest('[data-hl]'); if (!li && mapState.sel) { const a = store.assets[mapState.sel]; light(a ? (hostOf(a) || a).id : null); return; } light(li ? li.dataset.hl : null); });
 }
@@ -1462,6 +1480,7 @@ document.addEventListener('click', async e => {
     openEditor(el.dataset.coll, base, presets);
   }
   else if (a === 'edit') openEditor(el.dataset.coll, store[el.dataset.coll][el.dataset.id]);
+  else if (a === 'home-map') { const g = e.target.closest('[data-asset]'), f = e.target.closest('[data-focus]'); mapState.mode = 'view'; mapState.cam = null; mapState.sel = null; if (g) { mapState.sel = g.dataset.asset; mapState.focusAsset = g.dataset.asset; } else if (f) mapState.focus = f.dataset.focus; location.hash = '#/map'; }
   else if (a === 'complete') completeSchedule(el.dataset.id);
   else if (a === 'complete-sheet') { const sch = store.schedule[el.dataset.id]; if (sch) openDoneSheet(sch); }
   else if (a === 'toggle-todo') toggleTodo(el.dataset.id);
@@ -1486,6 +1505,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => { if (e.target.dataset.action === 'import' && e.target.files[0]) importJSON(e.target.files[0]); });
 document.addEventListener('keydown', e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('label.btn')) { const inp = e.target.querySelector('input[type="file"]'); if (inp) { e.preventDefault(); inp.click(); } }
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.action === 'home-map') { e.preventDefault(); location.hash = '#/map'; }
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.id === 'page-editor') { e.preventDefault(); $('[data-action="save-page"]').click(); }
   if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && state.user && !/input|textarea|select/i.test(e.target.tagName) && !$('#editor').open) { e.preventDefault(); openPicker(); }
 });
