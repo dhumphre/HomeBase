@@ -22,6 +22,7 @@ export const daysBetween = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new
 export const daysUntil = s => s ? daysBetween(today(), s) : null;
 export const slugify = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'page';
 export const fmtMiles = n => Math.round(Number(n)).toLocaleString('en-US');
+export const isCar = a => !!a && a.area === 'Car' && !a.parent; // a wheel set installed in a car is a part of it, not a car (the site agrees)
 const num = v => v == null || v === '' ? null : Number(v);
 // Numbers bound for Firestore: absent ('' or null) becomes null; anything that is not a finite number is refused, so NaN never gets stored.
 const finite = (v, what) => { const n = num(v); if (n != null && !Number.isFinite(n)) throw new Error(`${what} must be a number, got "${v}".`); return n; };
@@ -124,14 +125,14 @@ async function recordReading(a, miles, on, logs, force) {
 export async function setOdometer(assetQ, miles, date) {
   const m = positive(miles, 'miles'); if (m == null) throw new Error('miles is required: the odometer reading.'); const on = isoDate(date);
   const a = await find('assets', assetQ); const r = await recordReading(a, m, on, await all('log'), true);
-  return clean({ asset: a.name, previous: r.previous, odometer: { miles: m, on }, warning: [a.area !== 'Car' ? `${a.name} is in area ${a.area || 'none'}, not Car.` : null, r.warning].filter(Boolean).join(' ') || undefined });
+  return clean({ asset: a.name, previous: r.previous, odometer: { miles: m, on }, warning: [!isCar(a) ? (a.parent ? `${a.name} is part of another asset, not a car of its own.` : `${a.name} is in area ${a.area || 'none'}, not Car.`) : null, r.warning].filter(Boolean).join(' ') || undefined });
 }
 
 export async function status() {
   const [sched, todos, assets, logs] = await Promise.all([all('schedule'), all('todos'), all('assets'), all('log')]);
   const name = id => (assets.find(a => a.id === id) || {}).name || null;
   const odo = new Map(assets.map(a => { const o = odometerOf(a, logs), r = mileRate(a, logs); return [a.id, { reading: o ? { ...o, perDay: r.perDay } : null, rate: r }]; })); // every asset, since a task is projected from its own asset's readings
-  const cars = assets.filter(a => a.area === 'Car').map(a => ({ id: a.id, name: a.name, ...odo.get(a.id) }));
+  const cars = assets.filter(isCar).map(a => ({ id: a.id, name: a.name, ...odo.get(a.id) }));
   const rows = sched.map(s => { const i = dueInfo(s, (odo.get(s.asset) || {}).reading || null); return { id: s.id, task: s.task, asset: name(s.asset), assetId: s.asset || null, nextDue: s.nextDue || null, ...i, label: dueText(i) }; });
   const due = rows.filter(r => r.eff != null).sort((a, b) => a.eff - b.eff); const brief = r => ({ id: r.id, task: r.task, asset: r.asset });
   return {

@@ -110,6 +110,7 @@ const state = { user: null, owner: null, ready: false, route: { view: 'home', id
 const store = Object.fromEntries(COLLS.map(c => [c, {}]));
 const list = c => Object.values(store[c]);
 const assetName = id => (store.assets[id] || {}).name || '';
+const isCar = a => !!a && a.area === 'Car' && !a.parent; // a wheel set installed in a car is a part of it, not a car
 const pageBySlug = slug => list('pages').find(p => p.slug === slug) || list('pages').find(p => slugify(p.title) === slug); // a renamed page still answers to its title
 
 // ---------------------------------------------------------------- firebase
@@ -406,11 +407,11 @@ function assetDetail(id) {
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
       <div>
-        ${a.area === 'Car' ? carDash(a) : ''}
+        ${isCar(a) ? carDash(a) : ''}
         ${a.notes ? `<div class="page-body prose">${md(a.notes)}</div>` : ''}
         <div class="section"><h2>Service history <span class="more" style="font-family:var(--mono);font-size:12px;color:var(--ink-3)">${history.length}</span></h2>
           <div class="card">${history.length ? `<ul class="rows">${history.map(l => `<li><a class="t" href="#/log/${l.id}">${esc(l.item)}<span class="sub">${[onPart(l) ? assetName(l.asset) : '', l.doneBy || '', l.mileage ? `${miles(l.mileage)} mi` : ''].filter(Boolean).map(esc).join(' · ')}</span></a><span class="m">${money(l.cost)}</span><span class="m">${fmtDate(l.date)}</span></li>`).join('')}</ul>` : `<div class="empty">No work logged for this yet.</div>`}</div></div>
-        <div class="section"><h2>${a.area === 'Car' ? 'Service intervals' : 'Schedule'}</h2>
+        <div class="section"><h2>${isCar(a) ? 'Service intervals' : 'Schedule'}</h2>
           <div class="card">${sched.length ? `<ul class="rows">${sched.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${onPart(s) ? `${esc(assetName(s.asset))} · ` : ''}${esc(intervalText(s))}${s.lastDone ? ` · last ${fmtDate(s.lastDone)}` : ''}${s.lastMiles != null && s.lastMiles !== '' ? ` at ${miles(s.lastMiles)} mi` : ''}</span>${intervalBar(s)}</a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing scheduled for this.</div>`}</div></div>
         ${open.length ? `<div class="section"><h2>Open to-dos</h2><div class="card"><ul class="rows">${open.map(todoRow).join('')}</ul></div></div>` : ''}
       </div>
@@ -424,7 +425,7 @@ const LIFE = [
   [/\btv\b|television|oled|qled/i, 8], [/receiver|amplifier|soundbar/i, 12], [/speaker|subwoofer/i, 20],
   [/water heater/i, 11], [/furnace|boiler/i, 18], [/heat pump|air cond|condenser|mini.?split|\bac\b/i, 15], [/surge protector/i, 7], [/panel|breaker/i, 30],
   [/garage door/i, 12], [/roof/i, 22], [/mower|tractor|snow ?blower/i, 10], [/generator/i, 20], [/router|wifi|modem/i, 5], [/thermostat/i, 10],
-  [/crosstrek|outback|forester|legacy|subaru|\bcar\b|sedan|suv|truck|crossover/i, 15]];
+  [/\btires?\b|\btyres?\b|wheel set|wheels and tires/i, 6], [/crosstrek|outback|forester|legacy|subaru|\bcar\b|sedan|suv|truck|crossover/i, 15]];
 function lifespan(a) {
   const t = `${a.name} ${a.type || ''} ${a.make || ''} ${a.area || ''}`; const years = a.life != null && a.life !== '' ? Number(a.life) : (LIFE.find(([re]) => re.test(t)) || [])[1];
   const age = ageOf(a); if (!years || !age) return null;
@@ -521,7 +522,7 @@ function detail(coll, id) {
     if (f.t === 'asset') v = assetLink(v) || '<span class="m">deleted asset</span>'; else if (f.t === 'date') v = fmtDate(v); else if (f.k === 'cost') v = money(v); else if (['mileage', 'everyMiles', 'lastMiles'].includes(f.k)) v = miles(v) + ' mi'; else if (f.t === 'select') v = chip(v); else v = esc(v);
     return [f.l, v];
   });
-  if (coll === 'schedule') { const [lbl, cls] = dueText(d); rows.unshift(['Due', `<span class="${cls}">${esc(lbl)}</span>`]); if (d.schedule === undefined && d.asset && store.assets[d.asset] && store.assets[d.asset].area === 'Car') { const odo = odometerOf(d.asset); rows.push(['Odometer', odo ? `${miles(odo.miles)} mi · ${fmtDate(odo.on)}` : 'no reading yet']); } }
+  if (coll === 'schedule') { const [lbl, cls] = dueText(d); rows.unshift(['Due', `<span class="${cls}">${esc(lbl)}</span>`]); if (d.schedule === undefined && d.asset && isCar(store.assets[d.asset])) { const odo = odometerOf(d.asset); rows.push(['Odometer', odo ? `${miles(odo.miles)} mi · ${fmtDate(odo.on)}` : 'no reading yet']); } }
   if (coll === 'log' && d.schedule && store.schedule[d.schedule]) rows.push(['From task', `<a href="#/schedule/${d.schedule}">${esc(store.schedule[d.schedule].task)}</a>`]);
   const notes = d.notes || d.body;
   const extra = coll === 'schedule' ? btn('Mark done…', 'complete-sheet', `data-id="${id}"`, 'btn primary small') : coll === 'todos' && d.status !== 'done' ? btn('Mark done', 'toggle-todo', `data-id="${id}"`, 'btn primary small') : '';
@@ -723,7 +724,7 @@ const SHAPES = [
 ];
 function assetShape(a, room = null) {
   const t = `${a.name} ${a.type || ''} ${a.make || ''}`; let sh = null; for (const [re, x] of SHAPES) if (re.test(t)) { sh = x; break; }
-  if (!sh) sh = a.area === 'Car' ? SHAPES[1][1] : { kind: 'box', w: 2.2, d: 2.2, h: 2.4 };
+  if (!sh) sh = isCar(a) ? SHAPES[1][1] : { kind: 'box', w: 2.2, d: 2.2, h: 2.4 };
   // facing: the way the nose points (n = toward the back of the map, s = toward the viewer, e, w); parked outdoors a car faces the house
   const facing = (a.map && a.map.facing) || (room && room.kind === 'outdoor' ? 'n' : 's'); const across = facing === 'e' || facing === 'w';
   return { ...sh, w: ft(across ? sh.d : sh.w), d: ft(across ? sh.w : sh.d), h: ft(sh.h), facing, icon: assetIcon(a) };
@@ -1043,10 +1044,10 @@ function tipHtml(id) {
   const a = store.assets[id]; if (!a) return '';
   const st = assetStatusDeep(id);
   const next = st.items.slice(0, 3).map(s => { const [lbl, cls] = dueText(s); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m', '').trim()}">${lbl}</span></li>`; }).join('');
-  const odo = a.area === 'Car' ? odometerOf(a.id) : null;
+  const odo = isCar(a) ? odometerOf(a.id) : null;
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
-    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}${lifeLine(a)}
+    ${isCar(a) ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}${lifeLine(a)}
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
     ${st.parts.length ? `<div class="tip-line">Inside: ${esc(st.parts.map(c => c.name).join(', '))}</div>` : ''}
     ${st.todos.length ? `<div class="tip-line">${st.todos.length} open to-do${st.todos.length > 1 ? 's' : ''}: ${esc(st.todos.slice(0, 2).map(t => t.name).join(', '))}</div>` : ''}
@@ -1059,10 +1060,10 @@ function cardHtml(id) {
   const a = store.assets[id]; if (!a) return '';
   const st = assetStatus(id); const inside = parts(id); const host = a.parent ? store.assets[a.parent] : null; const room = assetRoom(hostOf(a) || a);
   const next = st.items.slice(0, 4).map(s => { const [lbl, cls] = dueText(s); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m', '').trim()}">${lbl}</span>${doneBtn(s, 'btn tiny')}</li>`; }).join('');
-  const odo = a.area === 'Car' ? odometerOf(a.id) : null;
+  const odo = isCar(a) ? odometerOf(a.id) : null;
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
-    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}${lifeLine(a)}
+    ${isCar(a) ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}${lifeLine(a)}
     ${host ? `<div class="tip-line">Inside <button type="button" class="link" data-sel="${host.id}">${esc(host.name)}</button>${room ? ` · ${esc(room.name)}` : ''}</div>` : room ? `<div class="tip-line">${esc(room.name)}</div>` : ''}
     ${inside.length ? `<div class="tip-sub">Inside this</div><ul class="tip-parts">${inside.map(c => { const cs = assetStatus(c.id); return `<li><button type="button" data-sel="${c.id}"><span class="glyph">${assetIcon(c)}</span><span class="t">${esc(c.name)}<span class="sub">${esc(cs.label)}</span></span><i class="dot ${cs.cls}"></i></button></li>`; }).join('')}</ul>` : ''}
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
@@ -1351,8 +1352,12 @@ function openEditor(coll, data = {}, presets = {}) {
     return `<div class="field ${f.wide ? 'wide' : ''} ${f.car ? 'car-only' : ''}"><label for="${id}">${esc(f.l)}</label>${input}</div>`;
   }).join('');
   // mileage fields belong to cars: shown when the record's area is Car or its asset is one
-  const syncCar = () => { const ar = $('#f-area'), as = $('#f-asset'); const viaAsset = as && store.assets[as.value] && store.assets[as.value].area === 'Car'; const holds = [...fields.querySelectorAll('.car-only input')].some(i => i.value !== ''); fields.classList.toggle('car', !!(viaAsset || (ar && ar.value === 'Car') || holds)); };
-  fields.addEventListener('change', e => { if (e.target.id === 'f-area' || e.target.id === 'f-asset') syncCar(); }); syncCar();
+  const syncCar = () => {
+    const ar = $('#f-area'), as = $('#f-asset'), pa = $('#f-parent'); const chosen = as && as.value ? store.assets[as.value] : null;
+    const notACar = (chosen && !isCar(chosen)) || !!(pa && pa.value); // a part of a car, or anything installed in something, has no odometer of its own
+    const holds = [...fields.querySelectorAll('.car-only input')].some(i => i.value !== '');
+    fields.classList.toggle('car', !!(isCar(chosen) || (ar && ar.value === 'Car' && !notACar) || holds)); };
+  fields.addEventListener('change', e => { if (e.target.id === 'f-area' || e.target.id === 'f-asset' || e.target.id === 'f-parent') syncCar(); }); syncCar();
   const dlg = $('#editor');
   dlg.dataset.coll = coll; dlg.dataset.id = data.id || '';
   dlg._base = data;
@@ -1404,7 +1409,7 @@ function openPicker() {
 async function completeSchedule(id) {
   const s = store.schedule[id]; if (!s) return;
   const a = s.asset ? store.assets[s.asset] : null;
-  if ((a && a.area === 'Car') || dueInfo(s).everyMiles) { openDoneSheet(s); return; }
+  if (isCar(a) || dueInfo(s).everyMiles) { openDoneSheet(s); return; }
   const entry = await save('log', { item: s.task, date: today(), area: s.area || null, asset: s.asset || null, doneBy: 'Me', notes: null, schedule: s.id });
   await rollSchedule(s, entry);
 }
@@ -1415,7 +1420,7 @@ function openDoneSheet(s) {
   openEditor('log', { schedule: s.id }, { item: s.task, area: s.area || (a && a.area) || 'House', asset: s.asset || '', date: today(), doneBy: lastBy });
   $('#editor-title').textContent = `Done: ${s.task}`;
   $('#editor')._after = saved => rollSchedule(s, saved);
-  const mi = $('#f-mileage'); if (mi && a && a.area === 'Car') { mi.placeholder = odo ? `last ${miles(odo.miles)} mi · ${fmtDate(odo.on)}` : 'odometer now'; mi.focus(); }
+  const mi = $('#f-mileage'); if (mi && isCar(a)) { mi.placeholder = odo ? `last ${miles(odo.miles)} mi · ${fmtDate(odo.on)}` : 'odometer now'; mi.focus(); }
 }
 // Roll a task forward from the log entry that completed it: last done, the mileage baseline, and the next date (or none, never a stale one).
 async function rollSchedule(s, entry) {
