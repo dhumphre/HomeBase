@@ -22,6 +22,10 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 const parseDate = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const fmtDate = s => { const d = parseDate(s); return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) : ''; };
 const daysUntil = s => { const d = parseDate(s); if (!d) return null; const t = parseDate(today()); return Math.round((d - t) / 86400000); };
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (s, n) => { const d = parseDate(s) || parseDate(today()); d.setDate(d.getDate() + n); return ymd(d); };
+const daysBetween = (a, b) => { const p = parseDate(a), q = parseDate(b); return p && q ? Math.round((q - p) / 86400000) : null; };
+const miles = n => Number(n).toLocaleString();
 const addInterval = (s, n, unit) => { const d = parseDate(s) || parseDate(today()); if (unit === 'weeks') d.setDate(d.getDate() + 7 * n); else if (unit === 'years') d.setFullYear(d.getFullYear() + n); else d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const money = n => n == null || n === '' ? '' : Number(n).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const slugify = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'page';
@@ -48,6 +52,8 @@ const SCHEMA = {
     { k: 'serial', l: 'Serial / VIN', t: 'text' },
     { k: 'year', l: 'Year', t: 'number' },
     { k: 'purchased', l: 'Purchased', t: 'date' },
+    { k: 'odometer', l: 'Odometer (mi)', t: 'number', car: true },
+    { k: 'odometerOn', l: 'Odometer read on', t: 'date', car: true },
     { k: 'specs', l: 'Specs', t: 'text', ph: 'Filter size, oil spec, tire size', wide: true },
     { k: 'contact', l: 'Contact', t: 'text', ph: 'Plumber, dealer, warranty line', wide: true },
     { k: 'manual', l: 'Manual URL', t: 'url', wide: true },
@@ -59,16 +65,18 @@ const SCHEMA = {
     { k: 'asset', l: 'Asset', t: 'asset', wide: true },
     { k: 'cost', l: 'Cost ($)', t: 'number' },
     { k: 'doneBy', l: 'Done by', t: 'select', opts: ['Me', 'Contractor', 'Dealer or shop'] },
-    { k: 'mileage', l: 'Mileage', t: 'number' },
+    { k: 'mileage', l: 'Odometer (mi)', t: 'number', car: true },
     { k: 'notes', l: 'Notes (markdown)', t: 'md', wide: true } ] },
   schedule: { one: 'Scheduled task', many: 'Schedule', title: 'task', blurb: 'Recurring upkeep with a next-due date.', fields: [
     { k: 'task', l: 'Task', t: 'text', req: true, wide: true },
     { k: 'area', l: 'Area', t: 'select', opts: AREAS },
     { k: 'asset', l: 'Asset', t: 'asset' },
     { k: 'every', l: 'Every', t: 'number', def: () => 12 },
-    { k: 'unit', l: 'Unit', t: 'select', opts: ['months', 'weeks', 'years', 'miles'] },
+    { k: 'unit', l: 'Unit', t: 'select', opts: ['months', 'weeks', 'years'] },
     { k: 'nextDue', l: 'Next due', t: 'date' },
     { k: 'lastDone', l: 'Last done', t: 'date' },
+    { k: 'everyMiles', l: 'Or every (miles)', t: 'number', ph: '6000', car: true },
+    { k: 'lastMiles', l: 'Last done at (mi)', t: 'number', car: true },
     { k: 'season', l: 'Season', t: 'select', opts: ['', 'Spring', 'Summer', 'Fall', 'Winter'] },
     { k: 'notes', l: 'Notes', t: 'md', wide: true } ] },
   todos: { one: 'To-do', many: 'To-dos', title: 'name', blurb: 'Open work, big or small.', fields: [
@@ -228,7 +236,7 @@ function render() {
 
 function renderNav() {
   const openTodos = list('todos').filter(t => t.status !== 'done').length;
-  const dueSoon = list('schedule').filter(s => { const n = daysUntil(s.nextDue); return n != null && n <= 30; }).length;
+  const dueSoon = list('schedule').filter(s => { const n = dueInfo(s).eff; return n != null && n <= 30; }).length;
   $('#nav').innerHTML = NAV.map(([v, label, k]) => {
     const count = v === 'todos' ? openTodos : v === 'schedule' ? dueSoon : 0;
     return `<a href="#/${v === 'home' ? '' : v}" ${state.route.view === v ? 'aria-current="page"' : ''}><span class="k">${k}</span>${label}${count ? `<span class="count">${count}</span>` : ''}</a>`;
@@ -244,9 +252,9 @@ const assetLink = id => id && store.assets[id] ? `<a href="#/assets/${id}">${esc
 
 // ----- home
 function home() {
-  const sched = list('schedule').filter(s => s.nextDue).sort(by('nextDue'));
-  const due = sched.filter(s => daysUntil(s.nextDue) <= 30);
-  const overdue = due.filter(s => daysUntil(s.nextDue) < 0).length;
+  const sched = list('schedule').map(s => ({ s, eff: dueInfo(s).eff })).filter(x => x.eff != null).sort((a, b) => a.eff - b.eff);
+  const due = sched.filter(x => x.eff <= 30).map(x => x.s);
+  const overdue = sched.filter(x => x.eff < 0).length;
   const todos = list('todos').filter(t => t.status !== 'done').sort((a, b) => (a.due || '9999') > (b.due || '9999') ? 1 : -1).slice(0, 8);
   const recent = list('log').sort(by('date', -1)).slice(0, 6);
   const projects = list('projects').filter(p => ['live', 'active'].includes(p.status)).sort(by('name'));
@@ -263,7 +271,7 @@ function home() {
     </div>
     <div class="grid">
       <section class="card"><header><h2>Due soon</h2><a class="more" href="#/schedule">all</a></header>
-        ${due.length ? `<ul class="rows">${due.map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(assetName(s.asset) || s.area || '')}</span></a><span class="${cls}">${lbl}</span>${btn('Done', 'complete', `data-id="${s.id}"`)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing due in the next month.</div>`}
+        ${due.length ? `<ul class="rows">${due.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(assetName(s.asset) || s.area || '')}</span></a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing due in the next month.</div>`}
       </section>
       <section class="card"><header><h2>Open to-dos</h2><a class="more" href="#/todos">all</a></header>
         ${todos.length ? `<ul class="rows">${todos.map(todoRow).join('')}</ul>` : `<div class="empty">No open to-dos.</div>`}
@@ -314,13 +322,15 @@ function toolbar(coll, f) {
 function schedule(id) {
   if (id) return detail('schedule', id);
   const f = state.filters.schedule || {};
-  let rows = list('schedule').sort((a, b) => (a.nextDue || '9999') > (b.nextDue || '9999') ? 1 : -1);
+  const eff = new Map(list('schedule').map(s => [s.id, dueInfo(s).eff]));
+  let rows = list('schedule').sort((a, b) => (eff.get(a.id) ?? 1e9) - (eff.get(b.id) ?? 1e9) || String(a.task).localeCompare(String(b.task)));
   if (f.area) rows = rows.filter(r => r.area === f.area);
   if (f.q) rows = rows.filter(r => `${r.task} ${r.notes || ''} ${assetName(r.asset)}`.toLowerCase().includes(f.q.toLowerCase()));
+  const undated = rows.filter(s => eff.get(s.id) == null).length;
   return `
-    ${head('Schedule', { eyebrow: 'recurring upkeep', actions: btn('+ Scheduled task', 'new', 'data-coll="schedule"', 'btn primary small') })}
+    ${head('Schedule', { eyebrow: `recurring upkeep${undated ? ` · ${undated} without a date yet` : ''}`, actions: btn('+ Scheduled task', 'new', 'data-coll="schedule"', 'btn primary small') })}
     ${toolbar('schedule', f)}
-    <div class="card">${rows.length ? `<ul class="rows">${rows.map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(assetName(s.asset) || s.area || '')} · every ${esc(s.every || '')} ${esc(s.unit || 'months')}${s.lastDone ? ' · last ' + fmtDate(s.lastDone) : ''}</span></a><span class="${cls}">${s.unit === 'miles' && !s.nextDue ? 'by mileage' : lbl || 'no date'}</span>${btn('Done', 'complete', `data-id="${s.id}"`)}</li>`; }).join('')}</ul>` : `<div class="empty">No scheduled tasks yet.</div>`}</div>`;
+    <div class="card">${rows.length ? `<ul class="rows">${rows.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(assetName(s.asset) || s.area || '')} · ${esc(intervalText(s))}${s.lastDone ? ' · last ' + fmtDate(s.lastDone) : ''}${s.lastMiles != null && s.lastMiles !== '' ? ` at ${miles(s.lastMiles)} mi` : ''}</span></a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">No scheduled tasks yet.</div>`}</div>`;
 }
 
 // ----- todos
@@ -355,7 +365,7 @@ function assetDetail(id) {
   const a = store.assets[id];
   if (!a) return head('Not found', { crumbs: `<a href="#/assets">Assets</a>` });
   const history = list('log').filter(l => l.asset === id).sort(by('date', -1));
-  const sched = list('schedule').filter(s => s.asset === id).sort((x, y) => (x.nextDue || '9999') > (y.nextDue || '9999') ? 1 : -1);
+  const sched = assetStatus(id).items;
   const open = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
   const room = assetRoom(a); const host = a.parent ? store.assets[a.parent] : null; const inside = parts(id); const carrier = hostOf(a); const carrierRoom = carrier && assetRoom(carrier);
@@ -364,15 +374,36 @@ function assetDetail(id) {
     ${head(esc(a.name), { crumbs: `<a href="#/assets">Assets</a> / ${esc(a.area || '')}`, actions: btn('+ Log work', 'new', `data-coll="log" data-asset="${id}" data-area="${esc(a.area || '')}"`, 'btn primary small') + btn('+ Schedule', 'new', `data-coll="schedule" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('+ To-do', 'new', `data-coll="todos" data-asset="${id}" data-area="${esc(a.area || '')}"`) + btn('Edit', 'edit', `data-coll="assets" data-id="${id}"`) })}
     <div class="detail">
       <div>
+        ${a.area === 'Car' ? carDash(a) : ''}
         ${a.notes ? `<div class="page-body prose">${md(a.notes)}</div>` : ''}
         <div class="section"><h2>Service history <span class="more" style="font-family:var(--mono);font-size:12px;color:var(--ink-3)">${history.length}</span></h2>
           <div class="card">${history.length ? `<ul class="rows">${history.map(l => `<li><a class="t" href="#/log/${l.id}">${esc(l.item)}<span class="sub">${esc(l.doneBy || '')}${l.mileage ? ' · ' + Number(l.mileage).toLocaleString() + ' mi' : ''}</span></a><span class="m">${money(l.cost)}</span><span class="m">${fmtDate(l.date)}</span></li>`).join('')}</ul>` : `<div class="empty">No work logged for this yet.</div>`}</div></div>
-        <div class="section"><h2>Schedule</h2>
-          <div class="card">${sched.length ? `<ul class="rows">${sched.map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">every ${esc(s.every || '')} ${esc(s.unit || 'months')}</span></a><span class="${cls}">${lbl || 'no date'}</span>${btn('Done', 'complete', `data-id="${s.id}"`)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing scheduled for this.</div>`}</div></div>
+        <div class="section"><h2>${a.area === 'Car' ? 'Service intervals' : 'Schedule'}</h2>
+          <div class="card">${sched.length ? `<ul class="rows">${sched.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(intervalText(s))}${s.lastDone ? ` · last ${fmtDate(s.lastDone)}` : ''}${s.lastMiles != null && s.lastMiles !== '' ? ` at ${miles(s.lastMiles)} mi` : ''}</span>${intervalBar(s)}</a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing scheduled for this.</div>`}</div></div>
         ${open.length ? `<div class="section"><h2>Open to-dos</h2><div class="card"><ul class="rows">${open.map(todoRow).join('')}</ul></div></div>` : ''}
       </div>
       <aside class="card"><dl class="props">${props.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></aside>
     </div>`;
+}
+
+// A car's dashboard: the odometer (with a one-line update), what is next, a year of spending and its age.
+function ageOf(a) {
+  const from = a.purchased || (a.year ? `${a.year}-07-01` : null); if (!from) return null;
+  const days = -daysUntil(from); if (days == null || days < 0) return null;
+  return { years: Math.floor(days / 365.25), days, since: a.purchased ? `bought ${fmtDate(a.purchased)}` : `${a.year} model` };
+}
+function carDash(a) {
+  const odo = odometerOf(a.id);
+  const next = list('schedule').filter(s => s.asset === a.id).map(s => ({ s, i: dueInfo(s) })).filter(x => x.i.eff != null).sort((p, q) => p.i.eff - q.i.eff)[0];
+  const spent = list('log').filter(l => l.asset === a.id && daysUntil(l.date) >= -365).reduce((t, l) => t + (Number(l.cost) || 0), 0);
+  const age = ageOf(a);
+  return `<div class="tiles car-dash">
+    <div class="tile odo"><div class="n">${odo ? miles(odo.miles) : '—'}</div><div class="l">${odo ? `odometer · read ${fmtDate(odo.on)}${odo.estimated ? '' : ` · ~${miles(Math.round(odo.perDay * 365))} mi/yr`}` : 'odometer · no reading yet'}</div>
+      <form class="odo-form" data-odo="${a.id}"><input type="number" inputmode="numeric" min="1" step="1" placeholder="${odo ? 'New reading' : 'Reading today'}" aria-label="Odometer reading"><button class="btn small" type="submit">Update</button></form></div>
+    <div class="tile ${next ? (next.i.eff < 0 ? 'warn' : next.i.eff <= 30 ? 'soon' : '') : ''}"><div class="n small">${next ? esc(next.s.task) : 'Nothing due'}</div><div class="l">next up${next ? ` · ${esc(dueText(next.s)[0])}` : ''}</div></div>
+    <div class="tile"><div class="n">${money(spent) || '$0'}</div><div class="l">spent, 12 months</div></div>
+    <div class="tile"><div class="n">${age ? age.years : '—'}</div><div class="l">${age ? `yrs old · ${esc(age.since)}` : 'age unknown'}</div></div>
+  </div>`;
 }
 
 // ----- projects
@@ -439,11 +470,13 @@ function detail(coll, id) {
   const title = d[s.title];
   const rows = s.fields.filter(f => f.k !== s.title && f.t !== 'md' && d[f.k] !== undefined && d[f.k] !== '' && d[f.k] !== null).map(f => {
     let v = d[f.k];
-    if (f.t === 'asset') v = assetLink(v) || '<span class="m">deleted asset</span>'; else if (f.t === 'date') v = fmtDate(v); else if (f.k === 'cost') v = money(v); else if (f.k === 'mileage') v = Number(v).toLocaleString() + ' mi'; else if (f.t === 'select') v = chip(v); else v = esc(v);
+    if (f.t === 'asset') v = assetLink(v) || '<span class="m">deleted asset</span>'; else if (f.t === 'date') v = fmtDate(v); else if (f.k === 'cost') v = money(v); else if (['mileage', 'everyMiles', 'lastMiles'].includes(f.k)) v = miles(v) + ' mi'; else if (f.t === 'select') v = chip(v); else v = esc(v);
     return [f.l, v];
   });
+  if (coll === 'schedule') { const [lbl, cls] = dueText(d); rows.unshift(['Due', `<span class="${cls}">${esc(lbl)}</span>`]); if (d.schedule === undefined && d.asset && store.assets[d.asset] && store.assets[d.asset].area === 'Car') { const odo = odometerOf(d.asset); rows.push(['Odometer', odo ? `${miles(odo.miles)} mi · ${fmtDate(odo.on)}` : 'no reading yet']); } }
+  if (coll === 'log' && d.schedule && store.schedule[d.schedule]) rows.push(['From task', `<a href="#/schedule/${d.schedule}">${esc(store.schedule[d.schedule].task)}</a>`]);
   const notes = d.notes || d.body;
-  const extra = coll === 'schedule' ? btn('Mark done today', 'complete', `data-id="${id}"`, 'btn primary small') : coll === 'todos' && d.status !== 'done' ? btn('Mark done', 'toggle-todo', `data-id="${id}"`, 'btn primary small') : '';
+  const extra = coll === 'schedule' ? btn('Mark done…', 'complete-sheet', `data-id="${id}"`, 'btn primary small') : coll === 'todos' && d.status !== 'done' ? btn('Mark done', 'toggle-todo', `data-id="${id}"`, 'btn primary small') : '';
   return `
     ${head(esc(title), { crumbs: `<a href="#/${coll}">${s.many}</a>`, actions: extra + btn('Edit', 'edit', `data-coll="${coll}" data-id="${id}"`) })}
     <div class="detail">
@@ -540,14 +573,69 @@ async function saveMap(patch) {
   try { await setDoc(doc(db, 'users', dataUid(), 'map', 'layout'), m); }
   catch (e) { toast(`Couldn't save the map (${e.code || e.message}).`, true); }
 }
+// Odometer readings for a car: its own recorded reading plus every log entry carrying mileage; the newest wins, and the two readings
+// farthest apart give the pace (miles a day) that turns "3,500 miles to go" into a date. With one reading the pace is a guess (~1,000 a month).
+function carReadings(id) {
+  const a = store.assets[id]; if (!a) return []; const out = [];
+  if (a.odometer != null && a.odometer !== '') out.push({ miles: Number(a.odometer), on: a.odometerOn || (a.updated ? ymd(new Date(a.updated)) : today()) });
+  for (const l of list('log')) if (l.asset === id && l.mileage != null && l.mileage !== '' && l.date) out.push({ miles: Number(l.mileage), on: l.date });
+  return out.filter(r => isFinite(r.miles) && r.miles > 0).sort((p, q) => p.on < q.on ? -1 : p.on > q.on ? 1 : p.miles - q.miles);
+}
+function odometerOf(id) {
+  const r = carReadings(id); if (!r.length) return null;
+  const first = r[0], last = r[r.length - 1]; let perDay = 33, estimated = true;
+  const days = daysBetween(first.on, last.on);
+  if (days >= 30 && last.miles > first.miles) { perDay = Math.min(150, Math.max(5, (last.miles - first.miles) / days)); estimated = false; }
+  return { miles: last.miles, on: last.on, perDay, estimated, stale: -daysUntil(last.on) };
+}
+// When a task is due: by its date, by its mileage interval (projected onto the calendar with the car's pace), or whichever comes first.
+function dueInfo(s) {
+  const days = s.nextDue ? daysUntil(s.nextDue) : null;
+  const everyMiles = s.everyMiles != null && s.everyMiles !== '' ? Number(s.everyMiles) : s.unit === 'miles' && s.every ? Number(s.every) : null;
+  const i = { days, everyMiles, milesLeft: null, estDays: null, eff: days, basis: days != null ? 'date' : null, needsOdometer: false, needsBaseline: false, odo: null };
+  if (everyMiles) {
+    const odo = s.asset ? odometerOf(s.asset) : null; i.odo = odo;
+    if (!odo) i.needsOdometer = true;
+    else if (s.lastMiles == null || s.lastMiles === '') i.needsBaseline = true;
+    else { i.milesLeft = Math.round(Number(s.lastMiles) + everyMiles - odo.miles); i.estDays = Math.round(i.milesLeft / odo.perDay); if (i.eff == null || i.estDays < i.eff) { i.eff = i.estDays; i.basis = 'miles'; } }
+  }
+  return i;
+}
+// The short due label for a task and its colour class, like dueLabel but aware of mileage.
+function dueText(s) {
+  const i = dueInfo(s);
+  if (i.basis === 'miles') { const cls = i.eff < 0 ? 'm over' : i.eff <= 30 ? 'm due' : 'm'; const est = i.milesLeft >= 0 && i.estDays <= 60 ? ` · ~${fmtDate(addDays(today(), i.estDays))}` : ''; return [i.milesLeft < 0 ? `${miles(-i.milesLeft)} mi over` : `in ${miles(i.milesLeft)} mi${est}`, cls]; }
+  if (i.basis === 'date') return dueLabel(s.nextDue);
+  if (i.needsOdometer) return ['needs odometer', 'm need'];
+  if (i.needsBaseline) return ['set last done', 'm need'];
+  return ['no date', 'm'];
+}
+const intervalText = s => { const parts = []; if (s.every && s.unit !== 'miles') parts.push(`every ${s.every} ${s.unit || 'months'}`); const i = dueInfo(s); if (i.everyMiles) parts.push(`${parts.length ? 'or ' : 'every '}${miles(i.everyMiles)} mi`); return parts.join(' ') || 'no interval'; };
+// The Done button for a task row: one tap for house and yard tasks; car tasks and tasks with no baseline open the sheet that asks for the reading.
+const doneBtn = (s, cls = 'btn small') => { const i = dueInfo(s); return i.needsBaseline || (i.eff == null && i.everyMiles) ? btn('Set last done…', 'complete-sheet', `data-id="${s.id}"`, cls + ' ghost') : btn('Done', 'complete', `data-id="${s.id}"`, cls); };
+// How far through its interval a task is (the larger of time and miles), for the thin bar under a car's service rows.
+function intervalBar(s) {
+  const i = dueInfo(s); const fr = [];
+  if (s.lastDone && s.every && s.unit !== 'miles') { const total = daysBetween(s.lastDone, addInterval(s.lastDone, Number(s.every), s.unit || 'months')); if (total > 0) fr.push(-daysUntil(s.lastDone) / total); }
+  if (i.everyMiles && i.odo && s.lastMiles != null && s.lastMiles !== '') fr.push((i.odo.miles - Number(s.lastMiles)) / i.everyMiles);
+  if (!fr.length) return '';
+  const f = Math.max(0, Math.min(1.15, Math.max(...fr)));
+  return `<span class="ibar ${f >= 1 ? 'over' : f >= .8 ? 'soon' : ''}"><i style="width:${Math.min(100, f * 100).toFixed(0)}%"></i></span>`;
+}
 function assetStatus(id) {
-  const items = list('schedule').filter(s => s.asset === id && s.nextDue).sort(by('nextDue'));
-  const worst = items.length ? daysUntil(items[0].nextDue) : null;
+  const all = list('schedule').filter(s => s.asset === id).map(s => ({ s, i: dueInfo(s) }));
+  const dated = all.filter(x => x.i.eff != null).sort((p, q) => p.i.eff - q.i.eff);
+  const items = [...dated.map(x => x.s), ...all.filter(x => x.i.eff == null).map(x => x.s)];
+  const worst = dated.length ? dated[0].i.eff : null; const top = dated[0] ? dated[0].i : null;
   const todos = list('todos').filter(t => t.asset === id && t.status !== 'done');
   const last = list('log').filter(l => l.asset === id).sort(by('date', -1))[0] || null;
+  const needs = all.some(x => x.i.needsOdometer) ? 'odometer' : all.some(x => x.i.needsBaseline) ? 'baseline' : null;
   const cls = worst == null ? (todos.length ? 'todo' : 'none') : worst < 0 ? 'over' : worst <= 30 ? 'soon' : 'ok';
-  const label = cls === 'over' ? `${-worst}d overdue` : cls === 'soon' ? (worst === 0 ? 'due today' : `due in ${worst}d`) : cls === 'ok' ? 'all good' : cls === 'todo' ? `${todos.length} open to-do${todos.length > 1 ? 's' : ''}` : 'nothing scheduled';
-  return { cls, worst, todos, items, last, label };
+  const label = cls === 'over' ? (top.basis === 'miles' ? `${miles(-top.milesLeft)} mi over` : `${-worst}d overdue`)
+    : cls === 'soon' ? (top.basis === 'miles' ? `due in ${miles(top.milesLeft)} mi` : worst === 0 ? 'due today' : `due in ${worst}d`)
+    : cls === 'ok' ? 'all good' : cls === 'todo' ? `${todos.length} open to-do${todos.length > 1 ? 's' : ''}`
+    : needs === 'odometer' ? 'needs an odometer reading' : needs === 'baseline' ? 'set last done' : all.length ? `${all.length} task${all.length > 1 ? 's' : ''}, no date yet` : 'nothing scheduled';
+  return { cls, worst, todos, items, last, label, needs };
 }
 // Docking: parts(id) are the assets installed in it; hostOf(a) is the placed asset that carries a docked part on the map; isInside guards against loops.
 const parts = id => list('assets').filter(a => a.parent === id).sort(by('name'));
@@ -903,9 +991,11 @@ function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
 function tipHtml(id) {
   const a = store.assets[id]; if (!a) return '';
   const st = assetStatusDeep(id);
-  const next = st.items.slice(0, 3).map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m ', '')}">${lbl}</span></li>`; }).join('');
+  const next = st.items.slice(0, 3).map(s => { const [lbl, cls] = dueText(s); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m', '').trim()}">${lbl}</span></li>`; }).join('');
+  const odo = a.area === 'Car' ? odometerOf(a.id) : null;
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
+    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
     ${st.parts.length ? `<div class="tip-line">Inside: ${esc(st.parts.map(c => c.name).join(', '))}</div>` : ''}
     ${st.todos.length ? `<div class="tip-line">${st.todos.length} open to-do${st.todos.length > 1 ? 's' : ''}: ${esc(st.todos.slice(0, 2).map(t => t.name).join(', '))}</div>` : ''}
@@ -917,16 +1007,18 @@ function tipHtml(id) {
 function cardHtml(id) {
   const a = store.assets[id]; if (!a) return '';
   const st = assetStatus(id); const inside = parts(id); const host = a.parent ? store.assets[a.parent] : null; const room = assetRoom(hostOf(a) || a);
-  const next = st.items.slice(0, 4).map(s => { const [lbl, cls] = dueLabel(s.nextDue); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m ', '')}">${lbl}</span></li>`; }).join('');
+  const next = st.items.slice(0, 4).map(s => { const [lbl, cls] = dueText(s); return `<li><span>${esc(s.task)}</span><span class="${cls.replace('m', '').trim()}">${lbl}</span>${doneBtn(s, 'btn tiny')}</li>`; }).join('');
+  const odo = a.area === 'Car' ? odometerOf(a.id) : null;
   return `<div class="tip-head"><span class="glyph">${assetIcon(a)}</span><div><b>${esc(a.name)}</b><div class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</div></div><i class="dot ${st.cls}"></i></div>
     <div class="tip-status ${st.cls}">${esc(st.label)}</div>
+    ${a.area === 'Car' ? `<div class="tip-line mono">${odo ? `${miles(odo.miles)} mi · read ${fmtDate(odo.on)}` : 'No odometer reading yet'}</div>` : ''}
     ${host ? `<div class="tip-line">Inside <button type="button" class="link" data-sel="${host.id}">${esc(host.name)}</button>${room ? ` · ${esc(room.name)}` : ''}</div>` : room ? `<div class="tip-line">${esc(room.name)}</div>` : ''}
     ${inside.length ? `<div class="tip-sub">Inside this</div><ul class="tip-parts">${inside.map(c => { const cs = assetStatus(c.id); return `<li><button type="button" data-sel="${c.id}"><span class="glyph">${assetIcon(c)}</span><span class="t">${esc(c.name)}<span class="sub">${esc(cs.label)}</span></span><i class="dot ${cs.cls}"></i></button></li>`; }).join('')}</ul>` : ''}
     ${next ? `<ul class="tip-list">${next}</ul>` : ''}
     ${st.todos.length ? `<div class="tip-line">${st.todos.length} open to-do${st.todos.length > 1 ? 's' : ''}: ${esc(st.todos.slice(0, 2).map(t => t.name).join(', '))}</div>` : ''}
     ${st.last ? `<div class="tip-line">Last: ${esc(st.last.item)} · ${fmtDate(st.last.date)}</div>` : '<div class="tip-line">No work logged yet</div>'}
     ${a.specs ? `<div class="tip-line mono">${esc(a.specs)}</div>` : ''}
-    <div class="row card-actions"><a class="btn small primary" href="#/assets/${a.id}">Open page ↗</a>${a.manual ? `<a class="btn small" href="${esc(a.manual)}" target="_blank" rel="noopener">Manual ↗</a>` : ''}<button type="button" class="btn small" data-close>Close</button></div>`;
+    <div class="row card-actions"><a class="btn small primary" href="#/assets/${a.id}">Open page ↗</a>${a.manual ? `<a class="btn small" href="${esc(a.manual)}" target="_blank" rel="noopener">Manual ↗</a>` : ''}${btn('+ Log work', 'new', `data-coll="log" data-asset="${a.id}" data-area="${esc(a.area || '')}"`)}${btn('+ To-do', 'new', `data-coll="todos" data-asset="${a.id}" data-area="${esc(a.area || '')}"`)}<button type="button" class="btn small" data-close>Close</button></div>`;
 }
 
 function bindMap() {
@@ -1034,7 +1126,14 @@ function bindMap() {
     const f = target.closest('[data-focus]'); if (f) { focusRoom(svg, wrap, f.dataset.focus); return; }
     const g = target.closest('[data-asset]'); if (g) selectAsset(g.dataset.asset); else if (mapState.sel) closeCard();
   });
-  document.addEventListener('keydown', function onKey(e) { if (!document.body.contains(svg)) { document.removeEventListener('keydown', onKey); return; } if (e.key === 'Escape' && mapState.sel) closeCard(); });
+  document.addEventListener('keydown', function onKey(e) {
+    if (!document.body.contains(svg)) { document.removeEventListener('keydown', onKey); return; }
+    if (/input|textarea|select/i.test(e.target.tagName) || $('#editor').open || $('#picker').open || mapState.mode !== 'view') return;
+    if (e.key === 'Escape' && mapState.sel) { closeCard(); return; }
+    const placed = resolvePlaced(mapState.floor).filter(p => !p.lost);
+    if (/^[1-9]$/.test(e.key) && placed[Number(e.key) - 1]) { e.preventDefault(); selectAsset(placed[Number(e.key) - 1].a.id, true); }
+    else if ((e.key === '[' || e.key === ']') && placed.length) { e.preventDefault(); const cur = placed.findIndex(p => p.a.id === (store.assets[mapState.sel] ? (hostOf(store.assets[mapState.sel]) || store.assets[mapState.sel]).id : null)); const nx = cur < 0 ? (e.key === ']' ? 0 : placed.length - 1) : (cur + (e.key === ']' ? 1 : placed.length - 1)) % placed.length; selectAsset(placed[nx].a.id, true); }
+  });
   svg.addEventListener('dblclick', e => { if (mapState.mode !== 'view') return; const rm = e.target.closest('[data-room]'); const r = rm && mapData().rooms.find(x => x.id === rm.dataset.room); if (r) focusRoom(svg, wrap, roomKey(r)); else setCam(svg, wrap, null); });
   if (mapState.focus) { const k = mapState.focus; mapState.focus = null; focusRoom(svg, wrap, k, false); }
   // hovering a row in the side list lights its marker
@@ -1193,8 +1292,11 @@ function openEditor(coll, data = {}, presets = {}) {
     else if (f.t === 'facing') { const cur = (data.map && data.map.facing) || ''; input = `<select id="${id}" name="${f.k}" data-initial="${esc(cur)}">${[['', 'Default (cars outdoors face the house)'], ['s', 'South: front toward you'], ['n', 'North: front toward the back of the map'], ['e', 'East: front to the right'], ['w', 'West: front to the left']].map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`; }
     else if (f.t === 'md') input = `<textarea id="${id}" name="${f.k}" spellcheck="true">${esc(v)}</textarea>`;
     else input = `<input id="${id}" name="${f.k}" type="${f.t === 'md' ? 'text' : f.t}" value="${esc(v)}" ${f.req ? 'required' : ''} ${f.ph ? `placeholder="${esc(f.ph)}"` : ''} ${f.t === 'number' ? 'step="any" inputmode="decimal"' : ''}>`;
-    return `<div class="field ${f.wide ? 'wide' : ''}"><label for="${id}">${esc(f.l)}</label>${input}</div>`;
+    return `<div class="field ${f.wide ? 'wide' : ''} ${f.car ? 'car-only' : ''}"><label for="${id}">${esc(f.l)}</label>${input}</div>`;
   }).join('');
+  // mileage fields belong to cars: shown when the record's area is Car or its asset is one
+  const syncCar = () => { const ar = $('#f-area'), as = $('#f-asset'); const viaAsset = as && store.assets[as.value] && store.assets[as.value].area === 'Car'; fields.classList.toggle('car', !!(viaAsset || (ar && ar.value === 'Car'))); };
+  fields.addEventListener('change', e => { if (e.target.id === 'f-area' || e.target.id === 'f-asset') syncCar(); }); syncCar();
   const dlg = $('#editor');
   dlg.dataset.coll = coll; dlg.dataset.id = data.id || '';
   dlg._base = data;
@@ -1209,8 +1311,10 @@ $('#editor-form').addEventListener('submit', async e => {
   e.preventDefault();
   const dlg = $('#editor'); const coll = dlg.dataset.coll; const s = SCHEMA[coll];
   const out = { ...(dlg._base || {}) };
+  const carOk = $('#editor-fields').classList.contains('car');
   for (const f of s.fields) {
     const el = $(`#f-${f.k}`); let v = el.value;
+    if (f.car && !carOk) continue; // hidden mileage fields keep whatever they had
     if (f.t === 'room') { if (v !== el.dataset.initial) { const [floor, ...rest] = v.split('|'); out.map = v ? { floor, room: rest.join('|'), ...(dlg._base.map && dlg._base.map.facing ? { facing: dlg._base.map.facing } : {}) } : null; } continue; }
     if (f.t === 'facing') { if (v !== el.dataset.initial) { const m = out.map !== undefined ? out.map : dlg._base.map; if (m) { out.map = { ...m }; if (v) out.map.facing = v; else delete out.map.facing; } } continue; }
     if (f.t === 'number') v = v === '' ? null : Number(v);
@@ -1218,9 +1322,11 @@ $('#editor-form').addEventListener('submit', async e => {
     out[f.k] = v === '' ? null : v;
   }
   if (coll === 'pages') { const wanted = dlg._base.slug || slugify(out.title); out.slug = wanted; const clash = list('pages').find(p => p.slug === wanted && p.id !== out.id); if (clash) out.slug = `${wanted}-${uid().slice(0, 4)}`; }
+  if (coll === 'schedule' && out.unit === 'miles') { if (out.everyMiles == null) out.everyMiles = out.every; out.every = null; out.unit = 'months'; } // an old miles-only row becomes a mileage interval
+  const after = dlg._after; dlg._after = null;
   dlg.close();
   const saved = await save(coll, out);
-  toast(`${s.one} saved`);
+  if (after) await after(saved); else toast(`${s.one} saved`);
   if (!dlg._base.id && ['assets', 'projects', 'pages'].includes(coll)) location.hash = coll === 'pages' ? `#/pages/${saved.slug}` : `#/${coll}/${saved.id}`;
 });
 $('#editor-delete').addEventListener('click', async () => {
@@ -1230,6 +1336,7 @@ $('#editor-delete').addEventListener('click', async () => {
   if (state.route.view === coll && state.route.id) location.hash = `#/${coll}`;
 });
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
+$('#editor').addEventListener('close', () => { $('#editor')._after = null; }); // cancelling the Done sheet rolls nothing
 
 function openPicker() {
   $('#picker-grid').innerHTML = COLLS.map(c => `<button type="button" data-action="new" data-coll="${c}"><b>${SCHEMA[c].one}</b><span>${SCHEMA[c].blurb}</span></button>`).join('');
@@ -1239,13 +1346,45 @@ function openPicker() {
 // ---------------------------------------------------------------- actions
 async function completeSchedule(id) {
   const s = store.schedule[id]; if (!s) return;
-  const t = today();
-  await save('log', { item: s.task, date: t, area: s.area || null, asset: s.asset || null, doneBy: 'Me', notes: null });
-  const next = { ...s, lastDone: t };
-  if (s.unit !== 'miles' && s.every) next.nextDue = addInterval(t, Number(s.every), s.unit || 'months');
-  await save('schedule', next);
-  toast(`Logged “${s.task}”${next.nextDue && s.unit !== 'miles' ? `, next due ${fmtDate(next.nextDue)}` : ''}`);
+  const a = s.asset ? store.assets[s.asset] : null;
+  if ((a && a.area === 'Car') || dueInfo(s).everyMiles) { openDoneSheet(s); return; }
+  const entry = await save('log', { item: s.task, date: today(), area: s.area || null, asset: s.asset || null, doneBy: 'Me', notes: null, schedule: s.id });
+  await rollSchedule(s, entry);
 }
+// The sheet behind Done for a car (and behind "Mark done…" anywhere): the log editor prefilled for this task; saving it rolls the task.
+function openDoneSheet(s) {
+  const a = s.asset ? store.assets[s.asset] : null; const odo = a ? odometerOf(a.id) : null;
+  const lastBy = (list('log').filter(l => l.asset === s.asset && l.doneBy).sort(by('date', -1))[0] || {}).doneBy || 'Me';
+  openEditor('log', { schedule: s.id }, { item: s.task, area: s.area || (a && a.area) || 'House', asset: s.asset || '', date: today(), doneBy: lastBy });
+  $('#editor-title').textContent = `Done: ${s.task}`;
+  $('#editor')._after = saved => rollSchedule(s, saved);
+  const mi = $('#f-mileage'); if (mi && a && a.area === 'Car') { mi.placeholder = odo ? `last ${miles(odo.miles)} mi · ${fmtDate(odo.on)}` : 'odometer now'; mi.focus(); }
+}
+// Roll a task forward from the log entry that completed it: last done, the mileage baseline, and the next date (or none, never a stale one).
+async function rollSchedule(s, entry) {
+  const date = entry.date || today(); const next = { ...s, lastDone: date };
+  next.nextDue = s.every && s.unit !== 'miles' ? addInterval(date, Number(s.every), s.unit || 'months') : null;
+  const mi = entry.mileage != null && entry.mileage !== '' ? Number(entry.mileage) : null;
+  if (mi != null) next.lastMiles = mi;
+  await save('schedule', next);
+  if (mi != null && s.asset) await bumpOdometer(s.asset, mi, date);
+  const i = dueInfo(next);
+  toast(`Logged “${s.task}”${next.nextDue ? `, next due ${fmtDate(next.nextDue)}` : ''}${i.milesLeft != null ? `${next.nextDue ? ' or' : ', next'} in ${miles(i.milesLeft)} mi` : ''}`);
+}
+// A new odometer reading for a car; readings dated before the one already recorded are kept in the log but do not move the car's reading.
+async function bumpOdometer(assetId, mi, date, force = false) {
+  const a = store.assets[assetId]; if (!a) return;
+  const cur = odometerOf(assetId);
+  if (!force && a.odometer != null && a.odometerOn && a.odometerOn > date) return;
+  if (cur && mi < cur.miles && cur.on <= date) toast(`${miles(mi)} mi is lower than the last reading, ${miles(cur.miles)} mi on ${fmtDate(cur.on)}`);
+  await save('assets', { ...a, odometer: mi, odometerOn: date });
+}
+document.addEventListener('submit', async e => {
+  const f = e.target.closest('form[data-odo]'); if (!f) return;
+  e.preventDefault(); const inp = f.querySelector('input'); const v = Math.round(Number(inp.value));
+  if (!isFinite(v) || v <= 0) { inp.focus(); return; }
+  await bumpOdometer(f.dataset.odo, v, today(), true); toast(`Odometer: ${miles(v)} mi`);
+});
 async function toggleTodo(id) {
   const t = store.todos[id]; if (!t) return;
   await save('todos', { ...t, status: t.status === 'done' ? 'open' : 'done', doneOn: t.status === 'done' ? null : today() });
@@ -1277,11 +1416,11 @@ async function seed() {
     ['Flush water heater', 'House', 12, 'months', '2027-06-01', 'Check the anode rod every few years.'],
     ['Service furnace or heat pump', 'House', 12, 'months', '2027-09-15', 'Book before the first cold snap.'],
     ['Drain hoses and winterize outdoor faucets', 'Yard', 12, 'months', '2026-11-28', 'Due now if not already done this year.'],
-    ['Oil change', 'Car', 5000, 'miles', null, 'Add the car as an asset with its oil spec and last service mileage.'],
-    ['Rotate tires', 'Car', 10000, 'miles', null, 'Usually every other oil change.'],
-    ['Replace engine and cabin air filters', 'Car', 12, 'months', null, 'Record both part numbers on the car asset.']
+    ['Oil change', 'Car', 6, 'months', null, 'Add the car as an asset with its oil spec and last service mileage.', 6000],
+    ['Rotate tires', 'Car', 6, 'months', null, 'Usually with every oil change.', 6000],
+    ['Replace engine and cabin air filters', 'Car', 12, 'months', null, 'Record both part numbers on the car asset.', 12000]
   ];
-  for (const [task, area, every, unit, nextDue, notes] of sched) if (!have('schedule', 'task', task)) put('schedule', { task, area, every, unit, nextDue, notes, asset: null, lastDone: null, season: null });
+  for (const [task, area, every, unit, nextDue, notes, everyMiles] of sched) if (!have('schedule', 'task', task)) put('schedule', { task, area, every, unit, nextDue, notes, asset: null, lastDone: null, season: null, everyMiles: everyMiles || null, lastMiles: null });
   const projects = [
     { name: 'Trailhead Almanac', status: 'live', started: '2026-11-21', liveUrl: 'https://dhumphre.github.io/WeatherTrack/', repo: 'https://github.com/dhumphre/WeatherTrack', services: 'GitHub Pages, Firebase, Claude Code, Open-Meteo, NWS', tags: 'web, hiking', summary: 'Hikeable-weather ledger for nearby places, one to three days out.', body: '## What it does\n\n- Pulls National Weather Service forecasts (no key) for each saved place and scores the next three days for hikeability.\n- Air quality from Open-Meteo shows per day and per hour; NWS Air Quality Alerts show as a badge.\n- Google sign-in syncs the place list across devices through Firebase.\n\n## How it is built\n\n- Single file, `index.html`, no build step. Hosted on GitHub Pages from the main branch.\n- Firebase project **trailhead-almanac**: Google sign-in, Firestore document `users/{uid}` with the places array, owner-only rules.\n- The web API key in the page is public by design. GitHub\'s secret scanner flags it as a false positive.\n\n## Updating\n\n```\ngit add index.html; git commit -m "Describe the change"; git push\n```\n\nScore weights live in `summarizeDay` in index.html.' },
     { name: 'Home Base', status: 'live', started: '2026-11-21', liveUrl: 'https://dhumphre.github.io/HomeBase/', repo: 'https://github.com/dhumphre/HomeBase', services: 'GitHub Pages, Firebase, Claude Code', tags: 'web, home', summary: 'This site: the logbook for the house, the cars and the projects.', body: '## How it is built\n\n- Three files: `index.html`, `styles.css`, `app.js`. No build step. Hosted on GitHub Pages.\n- Shares the **trailhead-almanac** Firebase project. Data lives in Firestore under `users/{uid}/{collection}/{id}` for assets, log, schedule, todos, projects and pages, with owner-only rules.\n- Markdown rendered with marked and sanitized with DOMPurify. `[[Page title]]` links between wiki pages.\n\n## Updating\n\n```\ngit add .; git commit -m "Describe the change"; git push\n```' },
@@ -1300,14 +1439,14 @@ async function seedCars() {
   const cars = [
     { name: '2020 Subaru Legacy', year: 2020, make: 'Subaru Legacy', type: 'Sedan', specs: 'Oil: 0W-20 synthetic. Tires: 225/65R17 (check the door jamb). Add VIN, plate and last service mileage.' },
     { name: '2017 Subaru Crosstrek', year: 2017, make: 'Subaru Crosstrek', type: 'Crossover', specs: 'Oil: 0W-20 synthetic. Tires: 225/55R17 (check the door jamb). Add VIN, plate and last service mileage.' }];
-  const service = [['Oil and filter change', 6, 'months'], ['Rotate tires', 6, 'months'], ['Replace engine and cabin air filters', 12, 'months'], ['Replace wiper blades', 12, 'months'], ['Brake fluid exchange', 36, 'months'], ['Registration renewal', 12, 'months']];
+  const service = [['Oil and filter change', 6, 'months', 6000], ['Rotate tires', 6, 'months', 6000], ['Replace engine and cabin air filters', 12, 'months', 12000], ['Replace wiper blades', 12, 'months', null], ['Brake fluid exchange', 30, 'months', 30000], ['Registration renewal', 12, 'months', null]];
   const existing = list('assets'); const garage = mapData().rooms.find(r => roomKey(r) === 'garage');
   const batch = writeBatch(db); let n = 0; const now = Date.now();
   cars.forEach((c, i) => {
     if (existing.some(a => a.name.toLowerCase() === c.name.toLowerCase())) return;
     const id = uid(); const map = garage ? { floor: garage.floor, x: garage.x + Math.round(garage.w * (i ? 0.7 : 0.3) / SNAP) * SNAP, y: garage.y + Math.round(garage.h * 0.55 / SNAP) * SNAP } : null;
     batch.set(userDoc('assets', id), { ...c, id, area: 'Car', serial: null, purchased: null, contact: null, manual: null, notes: '', map, created: now, updated: now }); n++;
-    for (const [task, every, unit] of service) { const sid = uid(); batch.set(userDoc('schedule', sid), { id: sid, task, area: 'Car', asset: id, every, unit, nextDue: null, lastDone: null, season: null, notes: 'Press Done after the next service and the date rolls forward.', created: now, updated: now }); n++; }
+    for (const [task, every, unit, everyMiles] of service) { const sid = uid(); batch.set(userDoc('schedule', sid), { id: sid, task, area: 'Car', asset: id, every, unit, everyMiles, lastMiles: null, nextDue: null, lastDone: null, season: null, notes: 'Set the odometer on the car, press Set last done with the mileage from the last service, and the task is tracked by months and miles.', created: now, updated: now }); n++; }
   });
   if (!n) { toast('Both cars are already here'); return; }
   try { await batch.commit(); toast(`Added both cars and ${n - 2} service items`); } catch (e) { toast(`Couldn't add the cars (${e.code || e.message})`, true); }
@@ -1324,6 +1463,7 @@ document.addEventListener('click', async e => {
   }
   else if (a === 'edit') openEditor(el.dataset.coll, store[el.dataset.coll][el.dataset.id]);
   else if (a === 'complete') completeSchedule(el.dataset.id);
+  else if (a === 'complete-sheet') { const sch = store.schedule[el.dataset.id]; if (sch) openDoneSheet(sch); }
   else if (a === 'toggle-todo') toggleTodo(el.dataset.id);
   else if (a === 'edit-page') { state.editing.page = el.dataset.id; render(); $('#page-editor').focus(); }
   else if (a === 'cancel-page') { state.editing.page = null; render(); }

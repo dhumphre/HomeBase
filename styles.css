@@ -120,6 +120,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -.01
 .btn.danger:hover { background: var(--danger-soft); }
 .btn.small { padding: 6px 11px; font-size: 13.5px; }
 .btn.ghost { background: transparent; }
+.btn.tiny { padding: 2px 8px; font-size: 12px; border-radius: 6px; }
 .icon { background: none; border: 0; color: var(--ink-3); font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
 .icon:hover { background: var(--surface-2); color: var(--ink); }
 
@@ -140,6 +141,10 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -.01
 .rows .m.due { color: var(--amber); }
 .rows .m.over { color: var(--danger); }
 .rows .m.ok { color: var(--accent-ink); }
+.rows .m.need { color: var(--amber); }
+.ibar { display: block; height: 4px; border-radius: 2px; background: var(--rule); margin-top: 6px; max-width: 220px; overflow: hidden; }
+.ibar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.ibar.soon i { background: var(--amber); } .ibar.over i { background: var(--danger); }
 .rows input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; flex: none; }
 .rows li.done .t { color: var(--ink-3); text-decoration: line-through; }
 
@@ -216,6 +221,7 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .fields { padding: 14px 18px; overflow: auto; display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
+.fields:not(.car) .car-only { display: none; }
 .field label { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 .field input, .field select, .field textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); color: var(--ink); width: 100%; }
 .field textarea { min-height: 120px; font-family: var(--mono); font-size: 13.5px; resize: vertical; }
@@ -235,6 +241,12 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .tile .l { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-top: 6px; }
 .tile.warn .n { color: var(--danger); }
 .tile.soon .n { color: var(--amber); }
+.car-dash .tile .n.small { font-size: 17px; line-height: 1.25; font-weight: 600; }
+.car-dash .tile.odo { grid-column: span 2; }
+.odo-form { display: flex; gap: 6px; margin-top: 10px; }
+.odo-form input { font: inherit; flex: 1; min-width: 0; width: 100%; padding: 5px 9px; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums; }
+.odo-form input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; border-color: var(--accent); }
+@media (max-width: 420px) { .car-dash .tile.odo { grid-column: 1 / -1; } }
 
 .callout { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .callout p { margin: 0; flex: 1; min-width: 220px; }
@@ -355,7 +367,10 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .tip-parts button:hover { background: var(--surface-2); }
 .tip-parts .glyph { font-size: 18px; }
 .tip-parts .t { flex: 1; min-width: 0; } .tip-parts .t .sub { display: block; font-size: 11.5px; color: var(--ink-3); }
-.map-card .card-actions { margin-top: 10px; display: flex; gap: 8px; }
+.map-card .card-actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.map-card .tip-list li { align-items: center; gap: 8px; }
+.map-card .tip-list li > span:first-child { flex: 1; min-width: 0; }
+.tip-list .need { color: var(--amber); }
 .map-card .link { font-size: inherit; }
 @media (max-width: 760px) { .map-card { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: 60%; } }
 .map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; width: 260px; font-size: 13px; }
