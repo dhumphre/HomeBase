@@ -239,60 +239,99 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .callout { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .callout p { margin: 0; flex: 1; min-width: 220px; }
 
-/* ---------- map ---------- */
-.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
-.map-side { display: grid; gap: 14px; }
-.map-wrap { position: relative; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-.map-wrap svg { display: block; width: 100%; height: auto; touch-action: none; user-select: none; cursor: grab; }
+/* ---------- map: a blueprint sheet with the house built on it as a white model ---------- */
+:root {
+  --sheet: #1c4270; --sheet-2: #112a4d; --sheet-ink: #eef3fa; --sheet-ink-2: #b9cbe0; --sheet-ink-3: #7e97b5; --sheet-line: rgba(255,255,255,.1);
+  --model-top: #eef3f8; --model-x: #c3d2e3; --model-y: #94a9c3; --slab-x: #16325a; --slab-y: #0c1f3b;
+  --bp-door: #dca96c; --bp-ok: #5fd39a; --bp-soon: #f4b942; --bp-over: #ff6b6b; --bp-todo: #c9b7f0; --bp-none: #8ea3bb;
+  --tint-0: rgba(126,214,178,.20); --tint-1: rgba(150,170,240,.22); --tint-2: rgba(240,205,140,.20); --tint-3: rgba(206,160,236,.22); --tint-4: rgba(130,196,236,.22); --tint-5: rgba(240,160,150,.20);
+}
+.main.wide { max-width: 1480px; }
+.map-layout { display: grid; gap: 16px; align-items: start; }
+.map-side { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; align-items: start; }
+.map-wrap { position: relative; background: radial-gradient(ellipse at 50% 42%, #1f4a7c 0%, var(--sheet) 45%, var(--sheet-2) 100%); border: 1px solid rgba(255,255,255,.08); border-radius: var(--radius); box-shadow: var(--shadow), inset 0 0 0 1px rgba(0,0,0,.25); overflow: hidden; color: var(--sheet-ink); }
+.map-wrap::before { content: ""; position: absolute; inset: 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 4px; pointer-events: none; }
+.map-wrap svg { display: block; width: 100%; height: auto; max-height: calc(100vh - 150px); min-height: 380px; touch-action: none; user-select: none; cursor: grab; }
 .map-wrap.panning svg { cursor: grabbing; }
-.map-reset { position: absolute; top: 10px; right: 10px; z-index: 4; }
 .map-wrap.edit svg { cursor: crosshair; }
 .map-wrap.placing svg { cursor: copy; }
-.ground { fill: var(--ground); }
-.gridline { fill: none; stroke: var(--rule); stroke-width: 1; opacity: .7; }
-.bgimg { opacity: .92; }
-.room .floor { fill: var(--room-0); }
-.room.t1 .floor { fill: var(--room-1); } .room.t2 .floor { fill: var(--room-2); } .room.t3 .floor { fill: var(--room-3); } .room.t4 .floor { fill: var(--room-4); } .room.t5 .floor { fill: var(--room-5); }
-.room .sheen { fill: none; stroke: rgba(255,255,255,.45); stroke-width: 2; }
-.room .wall { fill: none; stroke: var(--wall); stroke-width: 4; stroke-linejoin: round; }
-.room.sel .wall { stroke: var(--accent); stroke-dasharray: 8 5; }
+.map-reset { position: absolute; top: 18px; right: 18px; z-index: 4; background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); backdrop-filter: blur(6px); }
+.map-reset:hover { background: rgba(255,255,255,.22); }
+.sheet-title { position: absolute; left: 22px; bottom: 18px; z-index: 3; pointer-events: none; font-family: var(--mono); border-left: 2px solid rgba(255,255,255,.45); padding-left: 12px; display: grid; gap: 2px; }
+.sheet-title b { font: 700 17px var(--display); letter-spacing: .08em; text-transform: uppercase; color: #fff; }
+.sheet-title span { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--sheet-ink-3); }
+.ground { fill: var(--sheet); }
+.gridline { fill: none; stroke: rgba(255,255,255,.07); stroke-width: 1; }
+.gridline.major { stroke: rgba(255,255,255,.13); }
+.bgimg { opacity: .55; }
+.shadow polygon { fill: rgba(0,0,0,.5); }
+.slab .fy { fill: var(--slab-y); } .slab .fx { fill: var(--slab-x); }
+.room .floor { fill: var(--tint-0); }
+.room.t1 .floor { fill: var(--tint-1); } .room.t2 .floor { fill: var(--tint-2); } .room.t3 .floor { fill: var(--tint-3); } .room.t4 .floor { fill: var(--tint-4); } .room.t5 .floor { fill: var(--tint-5); }
+.map-wrap.plan .room .floor { stroke: rgba(255,255,255,.25); stroke-width: 1; }
+.room .wall { fill: none; stroke: var(--sheet-ink); stroke-width: 5; stroke-linejoin: round; }
+.room.sel .wall { stroke: var(--bp-soon); stroke-dasharray: 8 5; }
 .map-wrap.edit .room { cursor: move; }
-.door .sill { stroke: var(--door); stroke-width: 4; stroke-linecap: butt; }
-.door .leaf { stroke: var(--door); stroke-width: 3; stroke-linecap: round; }
-.door .swing { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.box .ft { fill: var(--model-top); } .box .fx { fill: var(--model-x); } .box .fy { fill: var(--model-y); }
+.wall.int .ft { fill: #dfe7f0; }
+.door .sill { stroke: var(--bp-door); stroke-width: 5; stroke-linecap: butt; }
+.map-wrap.iso .door .sill { fill: var(--bp-door); stroke: none; }
+.door .leaf { stroke: var(--bp-door); stroke-width: 3; stroke-linecap: round; }
+.door .swing { fill: rgba(255,255,255,.06); stroke: rgba(255,255,255,.55); stroke-width: 1.2; stroke-dasharray: 4 3; }
 .door .hit { fill: transparent; cursor: pointer; }
-.map-wrap.edit .door .hit:hover ~ .sill, .map-wrap.edit .door:hover .sill { stroke: var(--danger); }
-.map-wrap.iso .door .sill { fill: var(--door); }
-.map-wrap.iso .door .leaf-l { fill: color-mix(in srgb, var(--door) 72%, #000); stroke: rgba(0,0,0,.3); stroke-width: 1; }
-.map-wrap.iso .door .leaf-t { fill: color-mix(in srgb, var(--door) 85%, #fff); stroke: rgba(0,0,0,.3); stroke-width: 1; }
-.room-label { font: 600 15px var(--display); fill: var(--ink); letter-spacing: .01em; cursor: pointer; }
-.map-wrap.edit .room-label { pointer-events: none; }
-.chip rect { fill: var(--surface); stroke: var(--rule); stroke-width: 1; pointer-events: none; }
-.chip text { font: 600 10px var(--mono); fill: var(--ink-2); pointer-events: none; }
-.chip.over rect { fill: var(--danger); stroke: none; } .chip.soon rect { fill: var(--amber); stroke: none; } .chip.todo rect { fill: var(--purple-ink); stroke: none; } .chip.ok rect { fill: var(--accent); stroke: none; }
-.chip.over text, .chip.soon text, .chip.todo text, .chip.ok text { fill: var(--on-accent); }
-.map-wrap.busy:not(.zoomed) .marker .mlabel { display: none; }
-.map-wrap.zoomed .marker .mlabel { font-size: 9.5px; }
-.map-wrap.busy:not(.zoomed) .marker:hover .mlabel, .map-wrap.busy:not(.zoomed) .marker.lit .mlabel { display: block; }
+.map-wrap.edit .door:hover .sill { stroke: var(--bp-over); }
+.box.leaf .ft { fill: #f1cf9a; } .box.leaf .fx { fill: var(--bp-door); } .box.leaf .fy { fill: #a77a45; }
+.rlabel { cursor: pointer; transform-box: fill-box; transform-origin: center; transition: transform .25s; }
+.room-label { font: 600 19px var(--mono); fill: #fff; letter-spacing: .14em; paint-order: stroke; stroke: rgba(10,30,58,.7); stroke-width: 5px; stroke-linejoin: round; }
+.rlabel .rule { stroke: rgba(255,255,255,.4); stroke-width: 1.2; }
+.map-wrap.plan .room-label { font-size: 13px; letter-spacing: .1em; }
+.map-wrap.edit .room-label, .map-wrap.edit .rlabel { pointer-events: none; }
+.rlabel { transform: scale(var(--lscale, 1)); }
+.chip rect { fill: rgba(255,255,255,.16); stroke: rgba(255,255,255,.35); stroke-width: 1; pointer-events: none; }
+.chip text { font: 600 11.5px var(--mono); fill: #fff; pointer-events: none; }
+.chip.over rect { fill: var(--bp-over); stroke: none; } .chip.soon rect { fill: var(--bp-soon); stroke: none; } .chip.todo rect { fill: var(--bp-todo); stroke: none; } .chip.ok rect { fill: var(--bp-ok); stroke: none; }
+.chip.over text, .chip.soon text, .chip.todo text, .chip.ok text { fill: #0b1a2e; }
 select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); max-width: 130px; }
-.handle { fill: var(--accent); stroke: var(--surface); stroke-width: 2; cursor: nwse-resize; }
-.drawing { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; opacity: .8; }
+.handle { fill: var(--bp-soon); stroke: var(--sheet-2); stroke-width: 2; cursor: nwse-resize; }
+.drawing { fill: rgba(255,255,255,.1); stroke: #fff; stroke-width: 2; stroke-dasharray: 6 4; opacity: .9; }
+/* components */
 .marker { cursor: pointer; }
 .map-wrap.edit .marker { cursor: grab; }
-.marker .disc { fill: var(--surface); stroke: var(--ink-3); stroke-width: 3; filter: drop-shadow(0 2px 2px rgba(0,0,0,.18)); }
-.marker.ok .disc { stroke: var(--accent); }
-.marker.soon .disc { stroke: var(--amber); }
-.marker.over .disc { stroke: var(--danger); }
-.marker.todo .disc { stroke: var(--purple-ink); }
+.marker .disc { fill: #fff; stroke: var(--bp-none); stroke-width: 3.5; }
+.marker.ok .disc { stroke: var(--bp-ok); } .marker.soon .disc { stroke: var(--bp-soon); } .marker.over .disc { stroke: var(--bp-over); } .marker.todo .disc { stroke: var(--bp-todo); }
 .marker .halo { fill: transparent; transform-box: fill-box; transform-origin: center; }
-.marker.over .halo { fill: var(--danger); opacity: .18; animation: halo 1.8s ease-in-out infinite; }
-.marker.soon .halo { fill: var(--amber); opacity: .16; }
-.marker:hover .disc, .marker.lit .disc { stroke-width: 4.5; }
-.marker:hover .halo, .marker.lit .halo { fill: var(--accent); opacity: .14; }
-.marker .glyph { font-size: 20px; pointer-events: none; }
-.marker .mlabel { font: 500 12px var(--mono); fill: var(--ink-2); pointer-events: none; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
-@keyframes halo { 0%, 100% { transform: scale(1); opacity: .18; } 50% { transform: scale(1.3); opacity: .08; } }
-.map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; width: 260px; font-size: 13px; }
+.marker.over .halo { fill: var(--bp-over); opacity: .3; animation: halo 1.8s ease-in-out infinite; }
+.marker.soon .halo { fill: var(--bp-soon); opacity: .2; }
+.marker:hover .halo, .marker.lit .halo, .marker.hov .halo { fill: #fff; opacity: .22; }
+.marker .glyph { font-size: 22px; pointer-events: none; }
+.marker .mlabel { font: 600 11.5px var(--mono); fill: #fff; letter-spacing: .06em; pointer-events: none; paint-order: stroke; stroke: rgba(10,30,58,.8); stroke-width: 4px; stroke-linejoin: round; }
+.marker .num { pointer-events: none; transform-box: fill-box; transform-origin: center; }
+.marker .num circle { fill: #0f2a4d; stroke: #fff; stroke-width: 1.5; }
+.marker .num text { font: 700 11.5px var(--mono); fill: #fff; }
+.marker.iso .plinth .ft { fill: #fff; stroke: var(--bp-none); stroke-width: 3; stroke-linejoin: round; }
+.marker.iso.ok .plinth .ft { stroke: var(--bp-ok); } .marker.iso.soon .plinth .ft { stroke: var(--bp-soon); } .marker.iso.over .plinth .ft { stroke: var(--bp-over); } .marker.iso.todo .plinth .ft { stroke: var(--bp-todo); }
+.marker.iso .plinth .fx { fill: #c9d5e2; } .marker.iso .plinth .fy { fill: #9fb2c8; }
+.marker.iso .glyph { font-size: 30px; }
+.marker.iso:hover .plinth .ft, .marker.iso.lit .plinth .ft, .marker.iso.hov .plinth .ft { stroke-width: 5; }
+.marker .num { transform: scale(max(var(--lscale, 1), .5)); }
+.callout { cursor: pointer; }
+.callout .leader { stroke: rgba(255,255,255,.65); stroke-width: 1.3; }
+.callout .ctext { transform-box: fill-box; transform-origin: left center; transition: transform .25s; }
+.callout .cbg { fill: rgba(8,24,46,.86); stroke: rgba(255,255,255,.35); stroke-width: 1; }
+.callout .cdot { fill: var(--bp-none); }
+.callout.ok .cdot { fill: var(--bp-ok); } .callout.soon .cdot { fill: var(--bp-soon); } .callout.over .cdot { fill: var(--bp-over); } .callout.todo .cdot { fill: var(--bp-todo); }
+.callout.over .cbg { stroke: var(--bp-over); }
+.callout .clabel { font: 600 13px var(--mono); fill: #fff; letter-spacing: .05em; pointer-events: none; }
+.callout:hover .cbg, .callout.lit .cbg, .callout.hov .cbg { fill: #fff; } .callout:hover .clabel, .callout.lit .clabel, .callout.hov .clabel { fill: #0b1a2e; }
+.callout .ctext { transform: scale(var(--lscale, 1)); }
+.map-wrap.busy:not(.zoomed) .callout { display: none; }
+.map-wrap.busy:not(.zoomed) .callout.lit, .map-wrap.busy:not(.zoomed) .callout.hov { display: block; }
+.map-wrap.busy:not(.zoomed) .marker .mlabel { display: none; }
+.map-wrap.busy:not(.zoomed) .marker:hover .mlabel, .map-wrap.busy:not(.zoomed) .marker.lit .mlabel { display: block; }
+@keyframes halo { 0%, 100% { transform: scale(1); opacity: .3; } 50% { transform: scale(1.3); opacity: .1; } }
+@media (prefers-reduced-motion: reduce) { .marker.over .halo { animation: none; } }
+/* tooltip, legend, panels */
+.map-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px; width: 260px; font-size: 13px; }
 .tip-head { display: flex; align-items: center; gap: 10px; }
 .tip-head .glyph { font-size: 22px; }
 .tip-head b { font-family: var(--display); font-size: 15px; }
@@ -312,6 +351,8 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .legend { list-style: none; margin: 0; padding: 10px 16px; display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 3px solid var(--ink-3); margin-right: 8px; vertical-align: -1px; background: var(--surface); }
 .legend i.ok { border-color: var(--accent); } .legend i.soon { border-color: var(--amber); } .legend i.over { border-color: var(--danger); } .legend i.todo { border-color: var(--purple-ink); }
+.rows.keyed li { gap: 10px; }
+.rows.keyed .key { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--bg); font: 700 11.5px var(--mono); display: inline-grid; place-items: center; }
 .map-panel { padding: 12px 16px; display: grid; gap: 12px; }
 .map-panel .hint { margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .map-panel .field > span:first-child { font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
@@ -320,39 +361,7 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--rule); cursor: pointer; background: var(--room-0); }
 .swatch.t1 { background: var(--room-1); } .swatch.t2 { background: var(--room-2); } .swatch.t3 { background: var(--room-3); } .swatch.t4 { background: var(--room-4); } .swatch.t5 { background: var(--room-5); }
 .swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.callout.small { margin: 12px 16px; padding: 10px 12px; font-size: 13.5px; }
-@media (max-width: 900px) { .map-layout { grid-template-columns: 1fr; } }
-
-/* isometric */
-.map-wrap.iso { background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--surface) 70%, var(--accent-soft)), var(--surface) 70%); }
-.map-wrap.iso .room .floor { stroke: none; }
-.map-wrap.iso .room .wall-t, .map-wrap.iso .room .wall-l { stroke: none; }
-.map-wrap.iso .room .post { stroke: var(--wall); stroke-width: 1.5; stroke-linecap: round; }
-.map-wrap.iso .room .wall-t { fill: color-mix(in srgb, var(--room-0) 72%, #fff); }
-.map-wrap.iso .room .wall-l { fill: color-mix(in srgb, var(--room-0) 70%, #000); }
-.map-wrap.iso .room.t1 .wall-t { fill: color-mix(in srgb, var(--room-1) 72%, #fff); } .map-wrap.iso .room.t1 .wall-l { fill: color-mix(in srgb, var(--room-1) 70%, #000); }
-.map-wrap.iso .room.t2 .wall-t { fill: color-mix(in srgb, var(--room-2) 72%, #fff); } .map-wrap.iso .room.t2 .wall-l { fill: color-mix(in srgb, var(--room-2) 70%, #000); }
-.map-wrap.iso .room.t3 .wall-t { fill: color-mix(in srgb, var(--room-3) 72%, #fff); } .map-wrap.iso .room.t3 .wall-l { fill: color-mix(in srgb, var(--room-3) 70%, #000); }
-.map-wrap.iso .room.t4 .wall-t { fill: color-mix(in srgb, var(--room-4) 72%, #fff); } .map-wrap.iso .room.t4 .wall-l { fill: color-mix(in srgb, var(--room-4) 70%, #000); }
-.map-wrap.iso .room.t5 .wall-t { fill: color-mix(in srgb, var(--room-5) 72%, #fff); } .map-wrap.iso .room.t5 .wall-l { fill: color-mix(in srgb, var(--room-5) 70%, #000); }
-.map-wrap.iso .room .wall-top { fill: none; stroke: var(--wall); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
-.map-wrap.iso .room .base { fill: none; stroke: rgba(0,0,0,.18); stroke-width: 2; stroke-linecap: round; }
-.map-wrap.iso .room-label { font-size: 17px; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
-.marker.iso .shadow { fill: rgba(0,0,0,.22); }
-.marker.iso .tile { fill: var(--surface); stroke: var(--ink-3); stroke-width: 2.5; stroke-linejoin: round; }
-.marker.iso.ok .tile { stroke: var(--accent); } .marker.iso.soon .tile { stroke: var(--amber); } .marker.iso.over .tile { stroke: var(--danger); } .marker.iso.todo .tile { stroke: var(--purple-ink); }
-.marker.iso .glyph { font-size: 28px; }
-.marker.iso:hover .tile, .marker.iso.lit .tile { stroke-width: 4; }
-.plumbob { animation: bob 2.2s ease-in-out infinite; }
-.marker.iso.over .plumbob { animation-duration: 1s; }
-.plumbob .pb-top { fill: var(--ink-3); } .plumbob .pb-bot { fill: var(--ink-3); } .plumbob .pb-side { fill: rgba(0,0,0,.22); }
-.marker.iso.ok .pb-top, .marker.iso.ok .pb-bot { fill: var(--accent); }
-.marker.iso.soon .pb-top, .marker.iso.soon .pb-bot { fill: var(--amber); }
-.marker.iso.over .pb-top, .marker.iso.over .pb-bot { fill: var(--danger); }
-.marker.iso.todo .pb-top, .marker.iso.todo .pb-bot { fill: var(--purple-ink); }
-.plumbob .pb-top { filter: brightness(1.25); }
-@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
-@media (prefers-reduced-motion: reduce) { .plumbob, .marker.over .halo { animation: none; } }
+.callout-box.small { margin: 12px 16px; padding: 10px 12px; font-size: 13.5px; }
 
 /* ---------- toast ---------- */
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 50; box-shadow: var(--shadow); max-width: calc(100vw - 32px); }
@@ -374,5 +383,10 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
   .page-body { padding: 18px 16px; }
   .props { grid-template-columns: 1fr; gap: 2px 0; }
   .props dt { margin-top: 8px; }
+  .map-wrap svg { min-height: 240px; max-height: 70vh; }
+  .sheet-title { left: 12px; bottom: 10px; padding-left: 8px; }
+  .sheet-title b { font-size: 13px; }
+  .sheet-title span { font-size: 9.5px; }
+  .map-reset { top: 12px; right: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
