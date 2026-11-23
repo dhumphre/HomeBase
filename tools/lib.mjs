@@ -14,12 +14,17 @@ export const TITLE = { assets: 'name', log: 'item', schedule: 'task', todos: 'na
 export const keyPath = process.env.HB_SERVICE_ACCOUNT || join(homedir(), '.homebase', 'service-account.json');
 
 export const uid = () => randomUUID().replace(/-/g, '').slice(0, 20);
-export const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-export const addInterval = (s, n, unit) => { const d = new Date(`${s}T12:00:00`); if (unit === 'weeks') d.setDate(d.getDate() + 7 * n); else if (unit === 'years') d.setFullYear(d.getFullYear() + n); else d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-export const daysUntil = s => s ? Math.round((new Date(`${s}T12:00:00`) - new Date(`${today()}T12:00:00`)) / 864e5) : null;
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const today = () => ymd(new Date());
+export const addInterval = (s, n, unit) => { const d = new Date(`${s}T12:00:00`); if (unit === 'weeks') d.setDate(d.getDate() + 7 * n); else if (unit === 'years') d.setFullYear(d.getFullYear() + n); else d.setMonth(d.getMonth() + n); return ymd(d); };
+export const addDays = (s, n) => { const d = new Date(`${s}T12:00:00`); d.setDate(d.getDate() + n); return ymd(d); };
+export const daysBetween = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${a}T12:00:00`)) / 864e5);
+export const daysUntil = s => s ? daysBetween(today(), s) : null;
 export const slugify = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'page';
+export const fmtMiles = n => Math.round(Number(n)).toLocaleString('en-US');
 const num = v => v == null || v === '' ? null : Number(v);
 const clean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+const isoDate = s => { if (s && !/^\d{4}-\d{2}-\d{2}$/.test(String(s))) throw new Error(`Date must be YYYY-MM-DD, not "${s}".`); return s || today(); };
 
 let db, UID, ready;
 // The data belongs to the household owner: HB_UID, or HB_EMAIL, or the owner named by the access list, or the only user in the project.
@@ -46,19 +51,23 @@ export function checkColl(c) { if (!COLLS.includes(c)) throw new Error(`Collecti
 export async function all(c) { await init(); return (await coll(checkColl(c)).get()).docs.map(d => d.data()); }
 export async function create(c, data) { await init(); const id = uid(); const now = Date.now(); const doc = { ...clean(data), id, created: now, updated: now }; if (c === 'pages' && !doc.slug) doc.slug = slugify(doc.title); await coll(checkColl(c)).doc(id).set(doc); return doc; }
 export async function merge(c, id, data) { await init(); await coll(checkColl(c)).doc(id).set({ ...clean(data), updated: Date.now() }, { merge: true }); }
-export async function remove(c, q) { const r = await find(c, q); await coll(c).doc(r.id).delete(); return r; }
+export async function remove(c, q) { const r = q && typeof q === 'object' ? q : await find(c, q); await coll(checkColl(c)).doc(r.id).delete(); return r; } // q: id/name, or an already-found row
 
+// Rows matching q: the id, else the exact title(s), else case-insensitive substrings of the title.
+const matches = (rows, t, q) => { const n = String(q).toLowerCase(); const byId = rows.find(r => r.id === q); if (byId) return [byId]; const exact = rows.filter(r => String(r[t] || '').toLowerCase() === n); return exact.length ? exact : rows.filter(r => String(r[t] || '').toLowerCase().includes(n)); };
+const one = (c, q, m) => { if (m.length === 1) return m[0]; if (!m.length) throw new Error(`No ${c.replace(/s$/, '')} matches "${q}".`); throw new Error(`"${q}" matches several ${c}: ${m.map(r => `${r[TITLE[c]]} (${r.id})`).join('; ')}`); };
 // One document by id, exact title, or a unique case-insensitive substring of the title.
-export async function find(c, q) {
-  const rows = await all(c); const t = TITLE[c]; const needle = String(q).toLowerCase();
-  const byId = rows.find(r => r.id === q); if (byId) return byId;
-  const exact = rows.filter(r => String(r[t] || '').toLowerCase() === needle); if (exact.length === 1) return exact[0];
-  const part = rows.filter(r => String(r[t] || '').toLowerCase().includes(needle));
-  if (part.length === 1) return part[0];
-  if (!part.length) throw new Error(`No ${c.replace(/s$/, '')} matches "${q}".`);
-  throw new Error(`"${q}" matches several ${c}: ${part.map(r => `${r[t]} (${r.id})`).join('; ')}`);
-}
+export async function find(c, q) { return one(c, q, matches(await all(c), TITLE[c], q)); }
 export const findAsset = async q => q ? find('assets', q) : null;
+// A schedule row. Both cars share task names ("Oil and filter change"), so with assetQ only that asset's tasks are considered; without it a tie lists the owners.
+export async function findTask(q, assetQ) {
+  const [rows, assets] = await Promise.all([all('schedule'), all('assets')]); const a = assetQ ? one('assets', assetQ, matches(assets, 'name', assetQ)) : null;
+  const owner = r => (assets.find(x => x.id === r.asset) || {}).name;
+  const m = matches(a ? rows.filter(r => r.asset === a.id) : rows, 'task', q); if (m.length === 1) return m[0];
+  if (!m.length) throw new Error(`No task matches "${q}"${a ? ` for ${a.name}` : ''}.`);
+  const owners = [...new Set(m.map(owner).filter(Boolean))];
+  throw new Error(`"${q}" matches several: ${m.map(r => `${r.task} (${owner(r) || 'no asset'}, id ${r.id})`).join('; ')}.${a || !owners.length ? '' : ` Add asset: ${owners.join(' or ')}`}`);
+}
 
 export async function list(c, filters = {}) {
   let rows = await all(c);
@@ -66,31 +75,80 @@ export async function list(c, filters = {}) {
   return rows.sort((a, b) => String(a[TITLE[c]] || '').localeCompare(String(b[TITLE[c]] || '')));
 }
 
+// ---- Car math, shared with the site (app.js mirrors these exactly) ----
+// A car's odometer readings: the asset's own odometer@odometerOn plus every log entry for it that carries a mileage.
+const readings = (a, logs) => [...(a && a.odometer != null && a.odometerOn ? [{ miles: Number(a.odometer), on: a.odometerOn }] : []), ...(logs || []).filter(l => a && l.asset === a.id && l.date && l.mileage != null && l.mileage !== '' && !isNaN(Number(l.mileage))).map(l => ({ miles: Number(l.mileage), on: l.date }))];
+const stored = a => a.odometer != null && a.odometerOn ? { miles: Number(a.odometer), on: a.odometerOn } : null;
+// The latest reading { miles, on } (newest date; on a tie the higher miles), or null when the car has none.
+export function odometerOf(asset, logs) { const r = readings(asset, logs); return r.length ? r.reduce((b, x) => x.on > b.on || (x.on === b.on && x.miles > b.miles) ? x : b) : null; }
+// Miles per day from the two readings farthest apart in time (at least 30 days apart, clamped to 5..150); otherwise about 1,000 miles a month.
+export function mileRate(asset, logs) {
+  const r = readings(asset, logs).sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1 : a.miles - b.miles);
+  if (r.length > 1) { const first = r[0], last = r[r.length - 1], days = daysBetween(first.on, last.on); if (days >= 30) return { perDay: Math.min(150, Math.max(5, (last.miles - first.miles) / days)), estimated: false }; }
+  return { perDay: 33, estimated: true };
+}
+// When a task is due, by date and/or by miles. car is { miles, on, perDay } for the task's asset, or null. A row with unit 'miles' is the legacy spelling of everyMiles.
+export function dueInfo(s, car) {
+  const days = s.nextDue ? daysUntil(s.nextDue) : null; const everyMiles = num(s.everyMiles ?? (s.unit === 'miles' ? s.every : null)) || null;
+  let milesLeft = null, estDays = null, needsOdometer = false, needsBaseline = false;
+  if (everyMiles) { if (!car) needsOdometer = true; else if (s.lastMiles == null) needsBaseline = true; else { milesLeft = Number(s.lastMiles) + everyMiles - car.miles; estDays = Math.round(milesLeft / car.perDay); } }
+  let eff = days, basis = days != null ? 'date' : null; if (estDays != null && (eff == null || estDays < eff)) { eff = estDays; basis = 'miles'; }
+  return { days, milesLeft, estDays, eff, basis, everyMiles, needsOdometer, needsBaseline };
+}
+// Short label for a dueInfo: "in 1,200 mi · ~2027-01-15", "300 mi over", "12d overdue", "today", "in 12d", a date, or why nothing can be said.
+export function dueText(i) {
+  if (i.basis === 'miles') return (i.milesLeft < 0 ? `${fmtMiles(-i.milesLeft)} mi over` : `in ${fmtMiles(i.milesLeft)} mi`) + (i.estDays <= 60 ? ` · ~${addDays(today(), i.estDays)}` : '');
+  if (i.basis === 'date') return i.days < 0 ? `${-i.days}d overdue` : i.days === 0 ? 'today' : i.days <= 30 ? `in ${i.days}d` : addDays(today(), i.days);
+  return i.needsOdometer ? 'needs an odometer reading' : i.needsBaseline ? 'set last done' : 'no date';
+}
+// Records a reading against a car: the stored odometer moves when the reading is newer (or force), and a reading below the latest known one is kept but flagged.
+async function recordReading(a, miles, on, logs, force) {
+  const prev = odometerOf(a, logs), was = stored(a); const newer = force || !was || on > was.on || (on === was.on && miles > was.miles);
+  if (newer) await coll('assets').doc(a.id).update({ odometer: miles, odometerOn: on, updated: Date.now() });
+  const latest = odometerOf(newer ? { ...a, odometer: miles, odometerOn: on } : a, [...logs, { asset: a.id, date: on, mileage: miles }]);
+  return { previous: prev, latest, warning: prev && miles < prev.miles ? `${fmtMiles(miles)} mi is below the last known reading of ${fmtMiles(prev.miles)} mi on ${prev.on}.` : undefined };
+}
+// Sets a car's odometer outright (any asset is allowed, with a warning when it is not in area Car).
+export async function setOdometer(assetQ, miles, date) {
+  const a = await find('assets', assetQ); const m = num(miles); if (m == null || isNaN(m) || m < 0) throw new Error(`miles must be a number, not "${miles}".`);
+  const on = isoDate(date); const r = await recordReading(a, m, on, await all('log'), true);
+  return clean({ asset: a.name, previous: r.previous, odometer: { miles: m, on }, warning: [a.area !== 'Car' ? `${a.name} is in area ${a.area || 'none'}, not Car.` : null, r.warning].filter(Boolean).join(' ') || undefined });
+}
+
 export async function status() {
-  const [sched, todos, assets] = await Promise.all([all('schedule'), all('todos'), all('assets')]);
+  const [sched, todos, assets, logs] = await Promise.all([all('schedule'), all('todos'), all('assets'), all('log')]);
   const name = id => (assets.find(a => a.id === id) || {}).name || null;
-  const due = sched.filter(s => s.nextDue).map(s => ({ id: s.id, task: s.task, asset: name(s.asset), nextDue: s.nextDue, days: daysUntil(s.nextDue) })).sort((a, b) => a.days - b.days);
+  const cars = assets.filter(a => a.area === 'Car').map(a => { const o = odometerOf(a, logs), r = mileRate(a, logs); return { id: a.id, name: a.name, reading: o ? { ...o, perDay: r.perDay } : null, rate: r }; });
+  const rows = sched.map(s => { const c = cars.find(c => c.id === s.asset); const i = dueInfo(s, c ? c.reading : null); return { id: s.id, task: s.task, asset: name(s.asset), assetId: s.asset || null, nextDue: s.nextDue || null, ...i, label: dueText(i) }; });
+  const due = rows.filter(r => r.eff != null).sort((a, b) => a.eff - b.eff); const brief = r => ({ id: r.id, task: r.task, asset: r.asset });
   return {
-    overdue: due.filter(s => s.days < 0),
-    dueSoon: due.filter(s => s.days >= 0 && s.days <= 30),
+    overdue: due.filter(r => r.eff < 0),
+    dueSoon: due.filter(r => r.eff >= 0 && r.eff <= 30),
     openTodos: todos.filter(t => t.status !== 'done').map(t => ({ id: t.id, name: t.name, status: t.status || 'open', asset: name(t.asset), due: t.due || null, priority: t.priority || null })),
-    unscheduled: sched.filter(s => !s.nextDue).map(s => ({ id: s.id, task: s.task, asset: name(s.asset), every: s.every, unit: s.unit })),
+    cars: cars.map(c => { const next = due.find(r => r.assetId === c.id); return { name: c.name, id: c.id, odometer: c.reading ? c.reading.miles : null, readOn: c.reading ? c.reading.on : null, staleDays: c.reading ? -daysUntil(c.reading.on) : null, perDay: Math.round(c.rate.perDay * 10) / 10, estimatedRate: c.rate.estimated, nextUp: next ? { task: next.task, label: next.label } : null }; }),
+    needsOdometer: rows.filter(r => r.needsOdometer).map(brief),
+    needsBaseline: rows.filter(r => r.needsBaseline).map(brief),
+    unscheduled: rows.filter(r => r.eff == null && !r.everyMiles).map(r => { const s = sched.find(s => s.id === r.id); return { ...brief(r), every: s.every, unit: s.unit }; }),
   };
 }
 
 export async function logWork({ item, asset, date, area, cost, doneBy, mileage, notes }) {
-  const a = await findAsset(asset);
-  return create('log', { item, date: date || today(), area: area || (a ? a.area : null) || null, asset: a ? a.id : null, cost: num(cost), doneBy: doneBy || 'Me', mileage: num(mileage), notes: notes || null });
+  const a = await findAsset(asset); const t = isoDate(date); const miles = num(mileage);
+  const logs = a && a.area === 'Car' && miles != null ? await all('log') : null; // read before the new entry so the odometer check compares against prior readings
+  const d = await create('log', { item, date: t, area: area || (a ? a.area : null) || null, asset: a ? a.id : null, cost: num(cost), doneBy: doneBy || 'Me', mileage: miles, notes: notes || null });
+  if (!logs) return d; const r = await recordReading(a, miles, t, logs); return clean({ ...d, odometer: r.latest, warning: r.warning });
 }
 
-// Mirrors the site's Done button: a log entry, then the next-due date rolls forward from the completion date.
-export async function complete(q, { date, cost, mileage, notes, doneBy } = {}) {
-  const s = await find('schedule', q); const t = date || today();
-  const a = s.asset ? (await all('assets')).find(x => x.id === s.asset) : null;
-  await create('log', { item: s.task, date: t, area: s.area || null, asset: s.asset || null, doneBy: doneBy || 'Me', cost: num(cost), mileage: num(mileage), notes: notes || null });
-  const next = { lastDone: t }; if (s.unit !== 'miles' && s.every) next.nextDue = addInterval(t, Number(s.every), s.unit || 'months');
+// Mirrors the site's Done button: a log entry tagged with the schedule id; lastDone (and lastMiles when a reading is given) move to the completion; the next-due date rolls forward from it, or clears for a miles-only task so no stale date lingers.
+export async function complete(q, { asset, date, cost, mileage, notes, doneBy } = {}) {
+  const s = await findTask(q, asset); const t = isoDate(date); const miles = num(mileage);
+  const a = s.asset ? (await all('assets')).find(x => x.id === s.asset) : null; const logs = a && a.area === 'Car' && miles != null ? await all('log') : null;
+  await create('log', { item: s.task, date: t, area: s.area || null, asset: s.asset || null, doneBy: doneBy || 'Me', cost: num(cost), mileage: miles, notes: notes || null, schedule: s.id });
+  const next = { lastDone: t, nextDue: s.every && s.unit !== 'miles' ? addInterval(t, Number(s.every), s.unit || 'months') : null }; if (miles != null) next.lastMiles = miles;
   await merge('schedule', s.id, next);
-  return { task: s.task, asset: a ? a.name : null, done: t, nextDue: next.nextDue || null };
+  const r = logs ? await recordReading(a, miles, t, logs) : null; const everyMiles = num(s.everyMiles ?? (s.unit === 'miles' ? s.every : null)) || null; const last = next.lastMiles ?? num(s.lastMiles);
+  const nextAtMiles = everyMiles && last != null ? last + everyMiles : null; const odo = r ? r.latest : a && a.area === 'Car' ? odometerOf(a, await all('log')) : null;
+  return clean({ task: s.task, asset: a ? a.name : null, done: t, nextDue: next.nextDue, nextAtMiles, milesLeft: nextAtMiles != null && odo ? nextAtMiles - odo.miles : null, odometer: odo, warning: r ? r.warning : undefined });
 }
 
 export async function addTodo({ name, asset, due, priority, status, area, notes }) {
@@ -98,9 +156,12 @@ export async function addTodo({ name, asset, due, priority, status, area, notes 
   return create('todos', { name, status: status || 'open', priority: priority || '', due: due || null, area: area || (a ? a.area : null) || null, asset: a ? a.id : null, notes: notes || null });
 }
 
-export async function addSchedule({ task, asset, every, unit, nextDue, lastDone, season, area, notes }) {
-  const a = await findAsset(asset);
-  return create('schedule', { task, area: area || (a ? a.area : null) || 'House', asset: a ? a.id : null, every: num(every) ?? 12, unit: unit || 'months', nextDue: nextDue || null, lastDone: lastDone || null, season: season || null, notes: notes || null });
+// every+unit is the time interval, everyMiles the mileage one; a car task may have either or both. unit 'miles' (legacy) becomes everyMiles and is never stored.
+export async function addSchedule({ task, asset, every, unit, everyMiles, lastMiles, nextDue, lastDone, season, area, notes }) {
+  const a = await findAsset(asset); let n = num(every), u = unit || null, em = num(everyMiles);
+  if (u === 'miles') { em = em ?? n; n = null; u = null; }
+  if (n == null && em == null) n = 12;
+  return create('schedule', { task, area: area || (a ? a.area : null) || 'House', asset: a ? a.id : null, every: n, unit: u || 'months', everyMiles: em, lastMiles: num(lastMiles), nextDue: nextDue || null, lastDone: lastDone || null, season: season || null, notes: notes || null });
 }
 
 export async function layout() { await init(); return (await mapRef().get()).data() || { floors: [{ id: 'main', name: 'Main floor' }], rooms: [], doors: [] }; }
@@ -116,10 +177,13 @@ export async function addAsset({ name, area, type, make, serial, year, purchased
 export async function place(assetQ, room, facing) {
   const a = await find('assets', assetQ); const m = await layout();
   const ref = roomRef(m.rooms || [], room); if (!ref) throw new Error(`No room named "${room}" on the map. Rooms: ${[...new Set((m.rooms || []).map(r => r.name))].join(', ')}`);
-  if (facing && !['n', 's', 'e', 'w'].includes(facing)) throw new Error('facing must be n, s, e or w'); if (facing) ref.facing = facing;
-  await coll('assets').doc(a.id).update({ map: ref, updated: Date.now() }); return { asset: a.name, room, floor: ref.floor, facing: facing || null }; // update() replaces the map field; set-merge would keep old x,y
+  if (facing && !['n', 's', 'e', 'w'].includes(facing)) throw new Error('facing must be n, s, e or w'); if (facing || (a.map && a.map.facing)) ref.facing = facing || a.map.facing; // moving a car keeps the way it points
+  await coll('assets').doc(a.id).update({ map: ref, updated: Date.now() }); return { asset: a.name, room, floor: ref.floor, facing: ref.facing || null }; // update() replaces the map field; set-merge would keep old x,y
 }
-export async function saveLayout(patch) { await init(); const m = await layout(); const next = { ...m, ...patch, id: 'layout', updated: Date.now() }; await mapRef().set(next); return next; }
+// A door sits on a wall of room r when it lies on one of r's edges, strictly inside that edge (the site's test; doors on no wall are pruned on save).
+export const onWall = (d, r) => d.dir === 'h' ? (r.y === d.y || r.y + r.h === d.y) && d.x > r.x && d.x < r.x + r.w : (r.x === d.x || r.x + r.w === d.x) && d.y > r.y && d.y < r.y + r.h;
+const hasWall = (rooms, d) => (rooms || []).some(r => r.floor === d.floor && onWall(d, r));
+export async function saveLayout(patch) { await init(); const m = await layout(); const next = { ...m, ...patch, id: 'layout', updated: Date.now() }; next.doors = (next.doors || []).filter(d => hasWall(next.rooms, d)); await mapRef().set(next); return next; }
 // A room piece: same-named pieces join into one room; kind 'outdoor' is paved ground with no walls (driveway, patio). Units: about 11 per foot.
 export async function addRoom({ name, x, y, w, h, color, kind, floor }) {
   const m = await layout(); const f = floor || (m.floors && m.floors[0] ? m.floors[0].id : 'main'); const key = String(name).trim().toLowerCase();
@@ -128,13 +192,18 @@ export async function addRoom({ name, x, y, w, h, color, kind, floor }) {
   if (kind === 'outdoor' || (kind == null && twin && twin.kind === 'outdoor')) r.kind = 'outdoor';
   await saveLayout({ rooms: [...(m.rooms || []), r] }); return r;
 }
+// Removing the last piece of a room on a floor unplaces the components assigned to it (map: null) instead of losing them; doors left on no wall go too.
 export async function removeRoom(q) {
-  const m = await layout(); const key = String(q).trim().toLowerCase(); const gone = (m.rooms || []).filter(r => r.id === q || String(r.name || '').trim().toLowerCase() === key);
+  const m = await layout(); const rk = r => String(r.name || '').trim().toLowerCase(); const key = String(q).trim().toLowerCase(); const gone = (m.rooms || []).filter(r => r.id === q || rk(r) === key);
   if (!gone.length) throw new Error(`No room "${q}". Rooms: ${[...new Set((m.rooms || []).map(r => r.name))].join(', ')}`);
-  await saveLayout({ rooms: m.rooms.filter(r => !gone.includes(r)) }); return gone;
+  const rooms = m.rooms.filter(r => !gone.includes(r)); const lost = gone.filter(g => !rooms.some(r => r.floor === g.floor && rk(r) === rk(g)));
+  const orphans = lost.length ? (await all('assets')).filter(a => a.map && a.map.room && lost.some(g => g.floor === a.map.floor && rk(g) === String(a.map.room).toLowerCase())) : [];
+  const saved = await saveLayout({ rooms }); for (const a of orphans) await coll('assets').doc(a.id).update({ map: null, updated: Date.now() });
+  return { removed: gone, unplaced: orphans.map(a => a.name), doorsRemoved: (m.doors || []).length - (saved.doors || []).length };
 }
 export async function addDoor({ x, y, dir, w, floor }) {
   const m = await layout(); const d = { id: uid(), floor: floor || (m.floors && m.floors[0] ? m.floors[0].id : 'main'), x: Number(x), y: Number(y), dir: dir === 'v' ? 'v' : 'h', w: Number(w) || 36 };
+  if (!hasWall(m.rooms, d)) throw new Error(`No ${d.dir === 'h' ? 'left-right' : 'up-down'} wall passes through ${d.x},${d.y} on floor ${d.floor}; a door must sit on a room's edge.`);
   await saveLayout({ doors: [...(m.doors || []), d] }); return d;
 }
 export async function removeDoor(id) { const m = await layout(); const d = (m.doors || []).find(d => d.id === id); if (!d) throw new Error(`No door ${id}`); await saveLayout({ doors: m.doors.filter(x => x.id !== id) }); return d; }
