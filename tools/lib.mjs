@@ -23,6 +23,9 @@ export const daysUntil = s => s ? daysBetween(today(), s) : null;
 export const slugify = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'page';
 export const fmtMiles = n => Math.round(Number(n)).toLocaleString('en-US');
 const num = v => v == null || v === '' ? null : Number(v);
+// Numbers bound for Firestore: absent ('' or null) becomes null; anything that is not a finite number is refused, so NaN never gets stored.
+const finite = (v, what) => { const n = num(v); if (n != null && !Number.isFinite(n)) throw new Error(`${what} must be a number, got "${v}".`); return n; };
+const positive = (v, what, of = 'miles') => { const n = num(v); if (n != null && !(Number.isFinite(n) && n > 0)) throw new Error(`${what} must be a number of ${of}, got "${v}".`); return n; };
 const clean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 const isoDate = s => { if (s && !/^\d{4}-\d{2}-\d{2}$/.test(String(s))) throw new Error(`Date must be YYYY-MM-DD, not "${s}".`); return s || today(); };
 
@@ -76,50 +79,60 @@ export async function list(c, filters = {}) {
 }
 
 // ---- Car math, shared with the site (app.js mirrors these exactly) ----
-// A car's odometer readings: the asset's own odometer@odometerOn plus every log entry for it that carries a mileage.
-const readings = (a, logs) => [...(a && a.odometer != null && a.odometerOn ? [{ miles: Number(a.odometer), on: a.odometerOn }] : []), ...(logs || []).filter(l => a && l.asset === a.id && l.date && l.mileage != null && l.mileage !== '' && !isNaN(Number(l.mileage))).map(l => ({ miles: Number(l.mileage), on: l.date }))];
-const stored = a => a.odometer != null && a.odometerOn ? { miles: Number(a.odometer), on: a.odometerOn } : null;
-// The latest reading { miles, on } (newest date; on a tie the higher miles), or null when the car has none.
-export function odometerOf(asset, logs) { const r = readings(asset, logs); return r.length ? r.reduce((b, x) => x.on > b.on || (x.on === b.on && x.miles > b.miles) ? x : b) : null; }
-// Miles per day from the two readings farthest apart in time (at least 30 days apart, clamped to 5..150); otherwise about 1,000 miles a month.
+const isYmd = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+const posMiles = v => { const n = v == null || v === '' ? NaN : Number(v); return Number.isFinite(n) && n > 0 ? n : null; }; // a usable odometer value, else null
+const everyMilesOf = s => Number(s.everyMiles != null && s.everyMiles !== '' ? s.everyMiles : s.unit === 'miles' ? s.every : null) || null; // unit 'miles' is the legacy spelling of everyMiles
+const baseline = s => s.lastMiles == null || s.lastMiles === '' ? NaN : Number(s.lastMiles); // the odometer when the task was last done; NaN when unknown or junk
+// An asset's stored reading, when it is a positive mileage on a real date (an undated reading cannot be placed, so it does not count).
+const stored = a => { const m = a ? posMiles(a.odometer) : null; return m && isYmd(a.odometerOn) ? { miles: m, on: a.odometerOn } : null; };
+// Every reading for an asset, oldest first (same day: lower miles first): its stored reading plus each dated log entry carrying a positive mileage. Any asset may carry readings, not only cars.
+const readings = (a, logs) => { const s = stored(a); return [...(s ? [s] : []), ...(logs || []).filter(l => a && l.asset === a.id && isYmd(l.date)).map(l => ({ miles: posMiles(l.mileage), on: l.date })).filter(r => r.miles)].sort((p, q) => p.on < q.on ? -1 : p.on > q.on ? 1 : p.miles - q.miles); };
+// The latest reading { miles, on } (newest date; on a tie the higher miles), or null when the asset has none.
+export function odometerOf(asset, logs) { const r = readings(asset, logs); return r.length ? r[r.length - 1] : null; }
+// Miles per day from the first and last readings, when they are at least 30 days apart and the miles went up (clamped to 5..150); otherwise about 1,000 miles a month.
 export function mileRate(asset, logs) {
-  const r = readings(asset, logs).sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1 : a.miles - b.miles);
-  if (r.length > 1) { const first = r[0], last = r[r.length - 1], days = daysBetween(first.on, last.on); if (days >= 30) return { perDay: Math.min(150, Math.max(5, (last.miles - first.miles) / days)), estimated: false }; }
+  const r = readings(asset, logs);
+  if (r.length > 1) { const first = r[0], last = r[r.length - 1], days = daysBetween(first.on, last.on); if (days >= 30 && last.miles > first.miles) return { perDay: Math.min(150, Math.max(5, (last.miles - first.miles) / days)), estimated: false }; }
   return { perDay: 33, estimated: true };
 }
-// When a task is due, by date and/or by miles. car is { miles, on, perDay } for the task's asset, or null. A row with unit 'miles' is the legacy spelling of everyMiles.
+// When a task is due, by date and/or by miles. car is { miles, on, perDay } for the task's asset, or null.
 export function dueInfo(s, car) {
-  const days = s.nextDue ? daysUntil(s.nextDue) : null; const everyMiles = num(s.everyMiles ?? (s.unit === 'miles' ? s.every : null)) || null;
+  const days = s.nextDue ? daysUntil(s.nextDue) : null; const everyMiles = everyMilesOf(s);
   let milesLeft = null, estDays = null, needsOdometer = false, needsBaseline = false;
-  if (everyMiles) { if (!car) needsOdometer = true; else if (s.lastMiles == null) needsBaseline = true; else { milesLeft = Number(s.lastMiles) + everyMiles - car.miles; estDays = Math.round(milesLeft / car.perDay); } }
+  if (everyMiles) {
+    const last = baseline(s);
+    if (!car) needsOdometer = true; else if (!Number.isFinite(last)) needsBaseline = true;
+    else { milesLeft = Math.round(last + everyMiles - car.miles); const since = Math.max(0, daysBetween(car.on, today())); estDays = Math.round(milesLeft / car.perDay - since); if (milesLeft < 0) estDays = Math.min(estDays, -1); } // the reading is as of its date; the car has kept driving since
+  }
   let eff = days, basis = days != null ? 'date' : null; if (estDays != null && (eff == null || estDays < eff)) { eff = estDays; basis = 'miles'; }
   return { days, milesLeft, estDays, eff, basis, everyMiles, needsOdometer, needsBaseline };
 }
-// Short label for a dueInfo: "in 1,200 mi · ~2027-01-15", "300 mi over", "12d overdue", "today", "in 12d", a date, or why nothing can be said.
+// Short label for a dueInfo: "in 1,200 mi · ~2027-01-15", "in 200 mi · about now", "300 mi over", "12d overdue", "today", "in 12d", a date, or why nothing can be said.
 export function dueText(i) {
-  if (i.basis === 'miles') return (i.milesLeft < 0 ? `${fmtMiles(-i.milesLeft)} mi over` : `in ${fmtMiles(i.milesLeft)} mi`) + (i.estDays <= 60 ? ` · ~${addDays(today(), i.estDays)}` : '');
+  if (i.basis === 'miles') return i.milesLeft < 0 ? `${fmtMiles(-i.milesLeft)} mi over` : `in ${fmtMiles(i.milesLeft)} mi${i.estDays <= 0 ? ' · about now' : i.estDays <= 60 ? ` · ~${addDays(today(), i.estDays)}` : ''}`;
   if (i.basis === 'date') return i.days < 0 ? `${-i.days}d overdue` : i.days === 0 ? 'today' : i.days <= 30 ? `in ${i.days}d` : addDays(today(), i.days);
   return i.needsOdometer ? 'needs an odometer reading' : i.needsBaseline ? 'set last done' : 'no date';
 }
-// Records a reading against a car: the stored odometer moves when the reading is newer (or force), and a reading below the latest known one is kept but flagged.
+// Records a reading against an asset: the stored odometer moves when the reading is newer (or force). A reading below the latest known one and dated on or after it is kept but flagged; a backdated entry is not.
 async function recordReading(a, miles, on, logs, force) {
   const prev = odometerOf(a, logs), was = stored(a); const newer = force || !was || on > was.on || (on === was.on && miles > was.miles);
   if (newer) await coll('assets').doc(a.id).update({ odometer: miles, odometerOn: on, updated: Date.now() });
   const latest = odometerOf(newer ? { ...a, odometer: miles, odometerOn: on } : a, [...logs, { asset: a.id, date: on, mileage: miles }]);
-  return { previous: prev, latest, warning: prev && miles < prev.miles ? `${fmtMiles(miles)} mi is below the last known reading of ${fmtMiles(prev.miles)} mi on ${prev.on}.` : undefined };
+  return { previous: prev, latest, warning: prev && miles < prev.miles && on >= prev.on ? `${fmtMiles(miles)} mi is below the last known reading of ${fmtMiles(prev.miles)} mi on ${prev.on}.` : undefined };
 }
-// Sets a car's odometer outright (any asset is allowed, with a warning when it is not in area Car).
+// Sets an odometer outright (any asset is allowed, with a warning when it is not in area Car).
 export async function setOdometer(assetQ, miles, date) {
-  const a = await find('assets', assetQ); const m = num(miles); if (m == null || isNaN(m) || m < 0) throw new Error(`miles must be a number, not "${miles}".`);
-  const on = isoDate(date); const r = await recordReading(a, m, on, await all('log'), true);
+  const m = positive(miles, 'miles'); if (m == null) throw new Error('miles is required: the odometer reading.'); const on = isoDate(date);
+  const a = await find('assets', assetQ); const r = await recordReading(a, m, on, await all('log'), true);
   return clean({ asset: a.name, previous: r.previous, odometer: { miles: m, on }, warning: [a.area !== 'Car' ? `${a.name} is in area ${a.area || 'none'}, not Car.` : null, r.warning].filter(Boolean).join(' ') || undefined });
 }
 
 export async function status() {
   const [sched, todos, assets, logs] = await Promise.all([all('schedule'), all('todos'), all('assets'), all('log')]);
   const name = id => (assets.find(a => a.id === id) || {}).name || null;
-  const cars = assets.filter(a => a.area === 'Car').map(a => { const o = odometerOf(a, logs), r = mileRate(a, logs); return { id: a.id, name: a.name, reading: o ? { ...o, perDay: r.perDay } : null, rate: r }; });
-  const rows = sched.map(s => { const c = cars.find(c => c.id === s.asset); const i = dueInfo(s, c ? c.reading : null); return { id: s.id, task: s.task, asset: name(s.asset), assetId: s.asset || null, nextDue: s.nextDue || null, ...i, label: dueText(i) }; });
+  const odo = new Map(assets.map(a => { const o = odometerOf(a, logs), r = mileRate(a, logs); return [a.id, { reading: o ? { ...o, perDay: r.perDay } : null, rate: r }]; })); // every asset, since a task is projected from its own asset's readings
+  const cars = assets.filter(a => a.area === 'Car').map(a => ({ id: a.id, name: a.name, ...odo.get(a.id) }));
+  const rows = sched.map(s => { const i = dueInfo(s, (odo.get(s.asset) || {}).reading || null); return { id: s.id, task: s.task, asset: name(s.asset), assetId: s.asset || null, nextDue: s.nextDue || null, ...i, label: dueText(i) }; });
   const due = rows.filter(r => r.eff != null).sort((a, b) => a.eff - b.eff); const brief = r => ({ id: r.id, task: r.task, asset: r.asset });
   return {
     overdue: due.filter(r => r.eff < 0),
@@ -133,21 +146,21 @@ export async function status() {
 }
 
 export async function logWork({ item, asset, date, area, cost, doneBy, mileage, notes }) {
-  const a = await findAsset(asset); const t = isoDate(date); const miles = num(mileage);
-  const logs = a && a.area === 'Car' && miles != null ? await all('log') : null; // read before the new entry so the odometer check compares against prior readings
-  const d = await create('log', { item, date: t, area: area || (a ? a.area : null) || null, asset: a ? a.id : null, cost: num(cost), doneBy: doneBy || 'Me', mileage: miles, notes: notes || null });
+  const miles = positive(mileage, 'mileage'), paid = finite(cost, 'cost'), t = isoDate(date); const a = await findAsset(asset);
+  const logs = a && miles != null ? await all('log') : null; // read before the new entry so the odometer check compares against prior readings; any asset's reading moves
+  const d = await create('log', { item, date: t, area: area || (a ? a.area : null) || null, asset: a ? a.id : null, cost: paid, doneBy: doneBy || 'Me', mileage: miles, notes: notes || null });
   if (!logs) return d; const r = await recordReading(a, miles, t, logs); return clean({ ...d, odometer: r.latest, warning: r.warning });
 }
 
 // Mirrors the site's Done button: a log entry tagged with the schedule id; lastDone (and lastMiles when a reading is given) move to the completion; the next-due date rolls forward from it, or clears for a miles-only task so no stale date lingers.
 export async function complete(q, { asset, date, cost, mileage, notes, doneBy } = {}) {
-  const s = await findTask(q, asset); const t = isoDate(date); const miles = num(mileage);
-  const a = s.asset ? (await all('assets')).find(x => x.id === s.asset) : null; const logs = a && a.area === 'Car' && miles != null ? await all('log') : null;
-  await create('log', { item: s.task, date: t, area: s.area || null, asset: s.asset || null, doneBy: doneBy || 'Me', cost: num(cost), mileage: miles, notes: notes || null, schedule: s.id });
+  const miles = positive(mileage, 'mileage'), paid = finite(cost, 'cost'), t = isoDate(date); const s = await findTask(q, asset);
+  const a = s.asset ? (await all('assets')).find(x => x.id === s.asset) : null; const logs = a && miles != null ? await all('log') : null;
+  await create('log', { item: s.task, date: t, area: s.area || null, asset: s.asset || null, doneBy: doneBy || 'Me', cost: paid, mileage: miles, notes: notes || null, schedule: s.id });
   const next = { lastDone: t, nextDue: s.every && s.unit !== 'miles' ? addInterval(t, Number(s.every), s.unit || 'months') : null }; if (miles != null) next.lastMiles = miles;
   await merge('schedule', s.id, next);
-  const r = logs ? await recordReading(a, miles, t, logs) : null; const everyMiles = num(s.everyMiles ?? (s.unit === 'miles' ? s.every : null)) || null; const last = next.lastMiles ?? num(s.lastMiles);
-  const nextAtMiles = everyMiles && last != null ? last + everyMiles : null; const odo = r ? r.latest : a && a.area === 'Car' ? odometerOf(a, await all('log')) : null;
+  const r = logs ? await recordReading(a, miles, t, logs) : null; const everyMiles = everyMilesOf(s), was = baseline(s), last = next.lastMiles ?? (Number.isFinite(was) ? was : null);
+  const nextAtMiles = everyMiles && last != null ? last + everyMiles : null; const odo = r ? r.latest : a ? odometerOf(a, await all('log')) : null;
   return clean({ task: s.task, asset: a ? a.name : null, done: t, nextDue: next.nextDue, nextAtMiles, milesLeft: nextAtMiles != null && odo ? nextAtMiles - odo.miles : null, odometer: odo, warning: r ? r.warning : undefined });
 }
 
@@ -158,10 +171,11 @@ export async function addTodo({ name, asset, due, priority, status, area, notes 
 
 // every+unit is the time interval, everyMiles the mileage one; a car task may have either or both. unit 'miles' (legacy) becomes everyMiles and is never stored.
 export async function addSchedule({ task, asset, every, unit, everyMiles, lastMiles, nextDue, lastDone, season, area, notes }) {
-  const a = await findAsset(asset); let n = num(every), u = unit || null, em = num(everyMiles);
+  let u = unit || null, n = positive(every, 'every', u === 'miles' ? 'miles' : u || 'months'), em = positive(everyMiles, 'everyMiles'); const lm = positive(lastMiles, 'lastMiles');
   if (u === 'miles') { em = em ?? n; n = null; u = null; }
   if (n == null && em == null) n = 12;
-  return create('schedule', { task, area: area || (a ? a.area : null) || 'House', asset: a ? a.id : null, every: n, unit: u || 'months', everyMiles: em, lastMiles: num(lastMiles), nextDue: nextDue || null, lastDone: lastDone || null, season: season || null, notes: notes || null });
+  const a = await findAsset(asset);
+  return create('schedule', { task, area: area || (a ? a.area : null) || 'House', asset: a ? a.id : null, every: n, unit: u || 'months', everyMiles: em, lastMiles: lm, nextDue: nextDue || null, lastDone: lastDone || null, season: season || null, notes: notes || null });
 }
 
 export async function layout() { await init(); return (await mapRef().get()).data() || { floors: [{ id: 'main', name: 'Main floor' }], rooms: [], doors: [] }; }
@@ -170,7 +184,7 @@ export function roomRef(rooms, name) { const key = String(name || '').trim().toL
 export async function addAsset({ name, area, type, make, serial, year, purchased, specs, contact, manual, notes, room }) {
   let map = null, placedIn = null;
   if (room) { const m = await layout(); map = roomRef(m.rooms || [], room); placedIn = map ? room : null; }
-  const doc = await create('assets', { name, area: area || 'House', type: type || null, make: make || null, serial: serial || null, year: num(year), purchased: purchased || null, specs: specs || null, contact: contact || null, manual: manual || null, notes: notes || '', map });
+  const doc = await create('assets', { name, area: area || 'House', type: type || null, make: make || null, serial: serial || null, year: finite(year, 'year'), purchased: purchased || null, specs: specs || null, contact: contact || null, manual: manual || null, notes: notes || '', map });
   return { ...doc, placedIn };
 }
 // facing (optional): which way a car or other long object points: n (toward the back of the map), s (toward the viewer), e, w. Outdoors a car faces n by default.

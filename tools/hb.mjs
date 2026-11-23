@@ -79,6 +79,6 @@ try {
     case 'unshare': console.log(`Removed ${await hb.unshare(rest[0])} from the household list`); break;
     case 'shares': (await hb.shares()).forEach(s => console.log(`  ${s.email}  owner ${s.owner}`)); break;
     case 'dump': show(await hb.dump()); break;
-    default: console.log(readFileSync(new URL(import.meta.url), 'utf8').split('\n').filter(l => l.startsWith('//')).map(l => l.slice(3)).join('\n'));
+    default: { const src = readFileSync(new URL(import.meta.url), 'utf8').split(/\r?\n/); const usage = []; for (const l of src.slice(src[0].startsWith('#!') ? 1 : 0)) { if (!l.startsWith('//')) break; usage.push(l.slice(3)); } console.log(usage.join('\n')); } // the comment block at the top only, so comments inside the code stay out of the usage text
   }
 } catch (e) { console.error(e.message); process.exit(1); }
