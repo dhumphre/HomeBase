@@ -117,6 +117,24 @@ export async function place(assetQ, room) {
   const ref = roomRef(m.rooms || [], room); if (!ref) throw new Error(`No room named "${room}" on the map. Rooms: ${[...new Set((m.rooms || []).map(r => r.name))].join(', ')}`);
   await coll('assets').doc(a.id).update({ map: ref, updated: Date.now() }); return { asset: a.name, room, floor: ref.floor }; // update() replaces the map field; set-merge would keep old x,y
 }
+export async function saveLayout(patch) { await init(); const m = await layout(); const next = { ...m, ...patch, id: 'layout', updated: Date.now() }; await mapRef().set(next); return next; }
+// A room piece: same-named pieces join into one room; kind 'outdoor' is paved ground with no walls (driveway, patio). Units: about 11 per foot.
+export async function addRoom({ name, x, y, w, h, color, kind, floor }) {
+  const m = await layout(); const f = floor || (m.floors && m.floors[0] ? m.floors[0].id : 'main'); const key = String(name).trim().toLowerCase();
+  const twin = (m.rooms || []).find(r => r.floor === f && String(r.name || '').trim().toLowerCase() === key);
+  const r = { id: uid(), floor: f, name: String(name).trim(), x: Number(x), y: Number(y), w: Number(w), h: Number(h), color: color != null ? Number(color) : twin ? (twin.color ?? 0) : (m.rooms || []).length % 6 };
+  if (kind === 'outdoor' || (kind == null && twin && twin.kind === 'outdoor')) r.kind = 'outdoor';
+  await saveLayout({ rooms: [...(m.rooms || []), r] }); return r;
+}
+export async function removeRoom(q) {
+  const m = await layout(); const key = String(q).trim().toLowerCase(); const gone = (m.rooms || []).filter(r => r.id === q || String(r.name || '').trim().toLowerCase() === key);
+  if (!gone.length) throw new Error(`No room "${q}". Rooms: ${[...new Set((m.rooms || []).map(r => r.name))].join(', ')}`);
+  await saveLayout({ rooms: m.rooms.filter(r => !gone.includes(r)) }); return gone;
+}
+export async function addDoor({ x, y, dir, w, floor }) {
+  const m = await layout(); const d = { id: uid(), floor: floor || (m.floors && m.floors[0] ? m.floors[0].id : 'main'), x: Number(x), y: Number(y), dir: dir === 'v' ? 'v' : 'h', w: Number(w) || 36 };
+  await saveLayout({ doors: [...(m.doors || []), d] }); return d;
+}
 export async function mapSummary() {
   const m = await layout(); const assets = await all('assets'); const floors = m.floors || [{ id: 'main', name: 'Main floor' }];
   return { floors: floors.map(f => ({ ...f, rooms: (m.rooms || []).filter(r => r.floor === f.id).map(r => ({ id: r.id, name: r.name, x: r.x, y: r.y, w: r.w, h: r.h, color: r.color ?? 0 })), doors: (m.doors || []).filter(d => d.floor === f.id), assets: assets.filter(a => a.map && a.map.floor === f.id).map(a => ({ id: a.id, name: a.name, room: a.map.room || ((m.rooms || []).find(r => r.floor === f.id && a.map.x >= r.x && a.map.x <= r.x + r.w && a.map.y >= r.y && a.map.y <= r.y + r.h) || {}).name || null, pinned: a.map.x != null ? [a.map.x, a.map.y] : null })) })), unplaced: assets.filter(a => !a.map).map(a => a.name) };

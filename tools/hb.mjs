@@ -14,6 +14,9 @@
 //   node tools/hb.mjs asset "<name>" [--area House] [--type "Water heater"] [--make Rheem] [--year 2019] [--specs "..."] [--room Garage]
 //   node tools/hb.mjs schedule "<task>" --asset <name> --every 6 --unit months [--next YYYY-MM-DD] [--notes "..."]
 //   node tools/hb.mjs place <asset> <room>           put a component in a room on the map
+//   node tools/hb.mjs room "<name>" --x 820 --y 350 --w 200 --h 250 [--color 0-5] [--outdoor]   add a room piece (about 11 units per foot)
+//   node tools/hb.mjs rmroom <name or id>            remove a room (every piece of that name)
+//   node tools/hb.mjs door --x 880 --y 340 --dir h [--w 36|120]   a door (w 120 = wide opening / garage door) on a wall at that point
 //   node tools/hb.mjs map                            floors, rooms, doors and placed components
 //   node tools/hb.mjs share <email> | unshare <email> | shares     the household access list
 //   node tools/hb.mjs dump                           everything as JSON
@@ -41,6 +44,9 @@ try {
     case 'asset': { const d = await hb.addAsset({ name: rest[0], ...opt }); console.log(`Added asset "${d.name}" (${d.id})${d.placedIn ? ` in ${d.placedIn}` : opt.room ? ` (no room named "${opt.room}", left unplaced)` : ''}`); break; }
     case 'schedule': { const d = await hb.addSchedule({ task: rest[0], asset: opt.asset, every: opt.every, unit: opt.unit, nextDue: opt.next, lastDone: opt.last, season: opt.season, area: opt.area, notes: opt.notes }); console.log(`Scheduled "${d.task}" every ${d.every} ${d.unit}${d.nextDue ? `, next ${d.nextDue}` : ''} (${d.id})`); break; }
     case 'place': { const r = await hb.place(rest[0], rest[1]); console.log(`${r.asset} placed in ${r.room}`); break; }
+    case 'room': { const r = await hb.addRoom({ name: rest[0], x: opt.x, y: opt.y, w: opt.w, h: opt.h, color: opt.color, kind: opt.outdoor ? 'outdoor' : undefined, floor: opt.floor }); console.log(`Added ${r.kind === 'outdoor' ? 'outdoor area' : 'room'} "${r.name}" at ${r.x},${r.y} ${r.w}x${r.h} (${r.id})`); break; }
+    case 'rmroom': { const gone = await hb.removeRoom(rest[0]); console.log(`Removed ${gone.length} piece${gone.length > 1 ? 's' : ''} of ${gone[0].name}`); break; }
+    case 'door': { const d = await hb.addDoor({ x: opt.x, y: opt.y, dir: opt.dir, w: opt.w, floor: opt.floor }); console.log(`Added ${d.w >= 80 ? 'wide opening' : 'door'} at ${d.x},${d.y} (${d.id})`); break; }
     case 'map': { const m = await hb.mapSummary(); for (const f of m.floors) { console.log(`${f.name} (${f.id})`); f.rooms.forEach(r => console.log(`  room ${r.name}  x${r.x} y${r.y} w${r.w} h${r.h}  color ${r.color}  ${r.id}`)); f.doors.forEach(d => console.log(`  door ${d.dir} at ${d.x},${d.y} w${d.w}  ${d.id}`)); f.assets.forEach(a => console.log(`  asset ${a.name} in ${a.room || '?'}${a.pinned ? ` (pinned ${a.pinned})` : ''}  ${a.id}`)); } console.log(`Unplaced: ${m.unplaced.join(', ') || 'none'}`); break; }
     case 'share': console.log(`Added ${await hb.share(rest[0])} to the household list`); break;
     case 'unshare': console.log(`Removed ${await hb.unshare(rest[0])} from the household list`); break;

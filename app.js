@@ -464,7 +464,7 @@ function settings() {
 
 // ---------------------------------------------------------------- map
 // Rooms live in one document (map/layout); each asset carries its own map position {floor, x, y}.
-const MAP_W = 1000, MAP_H = 640, SNAP = 10;
+const MAP_W = 1200, MAP_H = 800, SNAP = 10;
 const mapState = { floor: null, mode: 'view', view: 'iso', selected: null, placing: null, tool: null, drag: null, pendingRender: false, hover: null, cam: null, focus: null };
 try { const v = localStorage.getItem('hb.mapview'); if (v === 'plan' || v === 'iso') mapState.view = v; } catch {}
 function mapData() {
@@ -478,32 +478,37 @@ function assetRoom(a) { if (!a || !a.map) return null; if (a.map.room) return ma
 function roomValue(a) { if (!a || !a.map) return ''; if (a.map.room) return `${a.map.floor}|${a.map.room}`; const r = assetRoom(a); return r ? `${r.floor}|${roomKey(r)}` : ''; }
 function roomOptions(cur) {
   const m = mapData(); const seen = new Set(); const opts = [];
-  for (const f of m.floors) for (const r of m.rooms.filter(r => r.floor === f.id).sort(by('name'))) { const v = `${f.id}|${roomKey(r)}`; if (seen.has(v)) continue; seen.add(v); opts.push(`<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(r.name)}${m.floors.length > 1 ? ` · ${esc(f.name)}` : ''}</option>`); }
+  for (const f of m.floors) for (const r of m.rooms.filter(r => r.floor === f.id).sort(by('name'))) { const v = `${f.id}|${roomKey(r)}`; if (seen.has(v)) continue; seen.add(v); opts.push(`<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(r.name)}${r.kind === 'outdoor' ? ' (outdoor)' : ''}${m.floors.length > 1 ? ` · ${esc(f.name)}` : ''}</option>`); }
   return `<option value="">— not on the map —</option>${opts.join('')}`;
 }
-const CELL = 60;
-// Where every component on a floor stands: hand-placed ones as stored, room-assigned ones on a grid inside their room (shrinking the grid when a room is crowded).
+// Where every component on a floor stands: hand-placed ones as stored; room-assigned ones packed to scale in rows from the back-left
+// corner of the room (biggest piece first, biggest things first), the way appliances line a wall and cars fill a drive.
 function resolvePlaced(floorId) {
   const m = mapData(); const rooms = m.rooms.filter(r => r.floor === floorId); const groups = roomGroups(rooms);
   const out = [], byRoom = new Map();
   for (const a of list('assets')) {
     if (!a.map || a.map.floor !== floorId) continue;
     if (a.map.room) { if (!byRoom.has(a.map.room)) byRoom.set(a.map.room, []); byRoom.get(a.map.room).push(a); }
-    else if (a.map.x != null) out.push({ a, x: a.map.x, y: a.map.y, auto: false });
+    else if (a.map.x != null) out.push({ a, shape: assetShape(a), x: a.map.x, y: a.map.y, auto: false });
   }
   for (const [k, items] of byRoom) {
-    items.sort(by('name')); const group = groups.get(k);
-    if (!group) { items.forEach(a => out.push({ a, x: null, y: null, auto: true, lost: true })); continue; }
-    const pieces = [...group].sort((p, q) => q.w * q.h - p.w * p.h); const pad = 26; let cell = CELL;
-    const cap = c => pieces.reduce((n, r) => n + Math.max(1, Math.floor((r.w - 2 * pad) / c)) * Math.max(1, Math.floor((r.h - 2 * pad) / c)), 0);
-    while (cap(cell) < items.length && cell > 34) cell -= 4;
+    const group = groups.get(k);
+    if (!group) { items.forEach(a => out.push({ a, shape: assetShape(a), x: null, y: null, auto: true, lost: true })); continue; }
+    const pieces = [...group].sort((p, q) => q.w * q.h - p.w * p.h); const gap = 8, pad = 10;
+    const queue = items.map(a => ({ a, shape: assetShape(a) })).sort((p, q) => q.shape.w * q.shape.d - p.shape.w * p.shape.d || String(p.a.name).localeCompare(String(q.a.name)));
     let i = 0;
     for (const r of pieces) {
-      const cols = Math.max(1, Math.floor((r.w - 2 * pad) / cell)), rows = Math.max(1, Math.floor((r.h - 2 * pad) / cell));
-      const ox = r.x + (r.w - cols * cell) / 2 + cell / 2, oy = r.y + (r.h - rows * cell) / 2 + cell / 2;
-      for (let n = 0; n < cols * rows && i < items.length; n++, i++) out.push({ a: items[i], x: Math.round(ox + (n % cols) * cell), y: Math.round(oy + Math.floor(n / cols) * cell), auto: true, col: n % cols });
+      let cx = r.x + pad, cy = r.y + pad, rowH = 0;
+      while (i < queue.length) {
+        const { a, shape } = queue[i];
+        if (cx > r.x + pad && cx + shape.w > r.x + r.w - pad) { cx = r.x + pad; cy += rowH + gap; rowH = 0; }
+        if (cy > r.y + pad && cy + shape.d > r.y + r.h - pad) break; // this piece is full
+        out.push({ a, shape, x: Math.round(cx + shape.w / 2), y: Math.round(cy + shape.d / 2), auto: true });
+        cx += shape.w + gap; rowH = Math.max(rowH, shape.d); i++;
+      }
+      if (i >= queue.length) break;
     }
-    for (; i < items.length; i++) out.push({ a: items[i], x: Math.round(pieces[0].x + pieces[0].w / 2), y: Math.round(pieces[0].y + pieces[0].h / 2), auto: true });
+    for (; i < queue.length; i++) { const r = pieces[0]; out.push({ a: queue[i].a, shape: queue[i].shape, x: Math.round(r.x + r.w / 2 + (i % 3) * 6), y: Math.round(r.y + r.h / 2 + (i % 3) * 6), auto: true, crowded: true }); }
   }
   return out;
 }
@@ -534,6 +539,26 @@ function assetStatus(id) {
 }
 const ICONS = [[/furnace|heat pump|boiler|hvac/i, '🔥'], [/water heater/i, '🚿'], [/car|truck|suv|wagon|sedan|subaru|toyota|honda|ford|jeep|tesla/i, '🚗'], [/mower|tractor/i, '🚜'], [/fridge|refrigerator|freezer/i, '🧊'], [/washer|dryer|laundry/i, '🧺'], [/dishwasher/i, '🍽️'], [/range|oven|stove|cooktop/i, '🍳'], [/air cond|\bac\b|mini.?split/i, '❄️'], [/sprinkler|irrigation|hose/i, '💦'], [/roof|chimney/i, '🏠'], [/gutter/i, '🌧️'], [/panel|electric|breaker/i, '⚡'], [/garage door/i, '🚪'], [/sump|pump|well|septic/i, '💧'], [/generator|battery|solar/i, '🔋'], [/tree|garden|lawn/i, '🌳'], [/bike|bicycle/i, '🚲'], [/smoke|detector|alarm/i, '🚨'], [/window|skylight/i, '🪟'], [/deck|fence|shed/i, '🪵'], [/router|wifi|network|modem/i, '📡'], [/thermostat/i, '🌡️'], [/fireplace|wood stove/i, '🪵'], [/hot tub|spa|pool/i, '🛁'], [/grill|bbq|smoker/i, '🍖']];
 function assetIcon(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; for (const [re, ic] of ICONS) if (re.test(t)) return ic; return a.area === 'Car' ? '🚗' : a.area === 'Yard' ? '🌿' : '🔧'; }
+const SCALE = 11; // map units per foot: the garage is 250 units across, about a 23 ft two-car garage
+const ft = v => Math.round(v * SCALE);
+// What a component is and how big it stands on the map: footprint w (across) x d (deep) x h (tall) in feet, and how it is drawn.
+const SHAPES = [
+  [/crosstrek|outback|forester|suv|wagon|truck|jeep|4runner|pickup|minivan|van\b/i, { kind: 'car', w: 6, d: 15, h: 5.4, tall: true }],
+  [/\bcar\b|sedan|subaru|toyota|honda|ford|tesla|legacy|civic|accord|camry|coupe|hatchback/i, { kind: 'car', w: 6, d: 15.5, h: 4.7 }],
+  [/washer|washing/i, { kind: 'washer', w: 2.3, d: 2.4, h: 3.2 }],
+  [/dryer/i, { kind: 'dryer', w: 2.3, d: 2.4, h: 3.2 }],
+  [/fridge|refrigerator|freezer/i, { kind: 'fridge', w: 3, d: 2.6, h: 5.8 }],
+  [/range|oven|stove|cooktop/i, { kind: 'range', w: 2.5, d: 2.3, h: 3 }],
+  [/dishwasher/i, { kind: 'box', w: 2, d: 2, h: 2.9 }],
+  [/water heater|tank/i, { kind: 'cyl', w: 1.9, d: 1.9, h: 5 }],
+  [/furnace|boiler|hvac|heat pump|air handler/i, { kind: 'box', w: 2.2, d: 2.6, h: 4.6 }],
+  [/air cond|condenser|mini.?split|\bac\b/i, { kind: 'fan', w: 3, d: 3, h: 2.6 }],
+  [/mower|tractor|snow ?blower/i, { kind: 'box', w: 2.2, d: 5.5, h: 3.2 }],
+  [/generator|battery/i, { kind: 'box', w: 2.4, d: 3.5, h: 2 }],
+  [/panel|breaker/i, { kind: 'box', w: 1.4, d: 0.6, h: 3.2 }],
+  [/bulb|spare|filter|box of|\bbin\b|supplies|parts|kit/i, { kind: 'bin', w: 1.6, d: 1.6, h: 1.2 }],
+];
+function assetShape(a) { const t = `${a.name} ${a.type || ''} ${a.make || ''}`; let sh = null; for (const [re, x] of SHAPES) if (re.test(t)) { sh = x; break; } if (!sh) sh = a.area === 'Car' ? SHAPES[1][1] : { kind: 'box', w: 2.2, d: 2.2, h: 2.4 }; return { ...sh, w: ft(sh.w), d: ft(sh.d), h: ft(sh.h), icon: assetIcon(a) }; }
 
 // Rooms with the same name on a floor join into one shape: shared color, no wall along their seams, one label.
 const roomKey = r => (r.name || '').trim().toLowerCase();
@@ -593,8 +618,8 @@ function map() {
   const roomsSvg = rooms.map(r => {
     const group = groups.get(roomKey(r)); const { main, color } = groupStyle(group);
     return `<g class="room t${color} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
-      <rect class="floor" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>
-      <path class="wall" d="${roomEdges(r, group, doors).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>
+      <rect class="floor ${r.kind === 'outdoor' ? 'outdoor' : ''}" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>
+      <path class="wall ${r.kind === 'outdoor' ? 'curb' : ''}" d="${roomEdges(r, group, doors).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>
       ${main.id === r.id ? `<text class="room-label" x="${r.x + r.w / 2}" y="${r.y + 24}" text-anchor="middle" data-focus="${esc(roomKey(r))}">${esc(r.name.toUpperCase())}</text>${badge(summary.get(roomKey(r)), r.x + r.w / 2, r.y + 32)}` : ''}
       ${edit ? `<rect class="handle" data-handle="${r.id}" x="${r.x + r.w - 14}" y="${r.y + r.h - 14}" width="14" height="14" rx="3"/>` : ''}
     </g>`; }).join('');
@@ -603,11 +628,11 @@ function map() {
     const h = d.dir === 'h', hw = d.w / 2, x0 = h ? d.x - hw : d.x, y0 = h ? d.y : d.y - hw, x1 = h ? d.x + hw : d.x, y1 = h ? d.y : d.y + hw;
     const leaf = d.w >= 80 ? '' : h ? `<path class="swing" d="M${x0} ${y0 + d.w}A${d.w} ${d.w} 0 0 0 ${x1} ${y0}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + d.w}"/>` : `<path class="swing" d="M${x0 + d.w} ${y0}A${d.w} ${d.w} 0 0 1 ${x0} ${y1}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0 + d.w}" y2="${y0}"/>`;
     return `<g class="door" data-door="${d.id}"><line class="sill" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/>${leaf}${edit ? `<rect class="hit" x="${d.x - hw - 6}" y="${d.y - hw - 6}" width="${d.w + 12}" height="${d.w + 12}"/>` : ''}</g>`; }).join('');
-  const markersSvg = placed.map(({ a, x, y, auto, col, n }) => { const st = assetStatus(a.id); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
-      <circle class="halo" r="28"/><circle class="disc" r="21"/>
-      <text class="glyph" y="8" text-anchor="middle">${assetIcon(a)}</text>
-      <g class="num"><circle cx="17" cy="-15" r="9"/><text x="17" y="-11.5" text-anchor="middle">${n}</text></g>
-      <text class="mlabel" y="${col % 2 ? 52 : 38}" text-anchor="middle">${esc(shortName(a.name, 20).toUpperCase())}</text>
+  const markersSvg = placed.map(({ a, x, y, auto, n, shape }) => { const st = assetStatus(a.id); const { w, d } = shape; const gs = Math.max(11, Math.min(26, Math.min(w, d) * 0.6)); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
+      <rect class="foot" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" rx="3"/>
+      <text class="glyph" y="${gs * 0.36}" text-anchor="middle" font-size="${gs}">${assetIcon(a)}</text>
+      <g class="num"><circle cx="${w / 2}" cy="${-d / 2}" r="9"/><text x="${w / 2}" y="${-d / 2 + 3.5}" text-anchor="middle">${n}</text></g>
+      <text class="mlabel" y="${d / 2 + 14}" text-anchor="middle">${esc(shortName(a.name, 20).toUpperCase())}</text>
     </g>`; }).join('');
   const bg = m.bg[floor.id] ? `<image href="${m.bg[floor.id]}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : '';
   const iso = !edit && mapState.view === 'iso';
@@ -630,8 +655,8 @@ function map() {
       ${sel ? `<section class="card"><header><h2>Room</h2></header><div class="map-panel">
           <label class="field"><span>Name</span><input type="text" id="room-name" value="${esc(sel.name)}" data-map="room-name"></label>
           <div class="swatches">${[0, 1, 2, 3, 4, 5].map(i => `<button type="button" class="swatch t${i} ${groupStyle(roomGroups(rooms).get(roomKey(sel)) || [sel]).color === i ? 'on' : ''}" data-action="map-room-color" data-value="${i}" aria-label="Color ${i + 1}"></button>`).join('')}</div>
-          <p class="hint">${(roomGroups(rooms).get(roomKey(sel)) || []).length > 1 ? `One of ${roomGroups(rooms).get(roomKey(sel)).length} pieces of ${esc(sel.name)}. ` : ''}Pieces with the same name join into one room, for L-shapes.</p>
-          <div class="row">${btn('Delete piece', 'map-del-room', '', 'btn small danger')}</div></div></section>` : ''}
+          <p class="hint">${(roomGroups(rooms).get(roomKey(sel)) || []).length > 1 ? `One of ${roomGroups(rooms).get(roomKey(sel)).length} pieces of ${esc(sel.name)}. ` : ''}Pieces with the same name join into one room, for L-shapes.${sel.kind === 'outdoor' ? ' Outdoor: paved ground with no walls, like a driveway or patio.' : ''}</p>
+          <div class="row">${btn(sel.kind === 'outdoor' ? 'Make it a room' : 'Make it outdoor', 'map-room-kind', `data-value="${sel.kind === 'outdoor' ? '' : 'outdoor'}"`)}${btn('Delete piece', 'map-del-room', '', 'btn small danger')}</div></div></section>` : ''}
       <section class="card"><header><h2>Place components</h2><span class="more">${unplaced.length}</span></header>
         ${placingAsset ? `<div class="callout callout-box small"><p>Click on the map to place <b>${esc(placingAsset.name)}</b>.</p>${btn('Cancel', 'map-place-cancel')}</div>` : ''}
         ${unplaced.length ? `<ul class="rows">${unplaced.map(a => `<li><span class="t">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc(a.area || '')}</span></span><span class="row"><select class="mini" data-map="place-room" data-id="${a.id}" aria-label="Room for ${esc(a.name)}"><option value="">Room…</option>${roomOptions('').replace(/^<option[^>]*>[^<]*<\/option>/, '')}</select>${btn('Pin', 'map-place', `data-id="${a.id}"`, 'btn small ghost')}</span></li>`).join('')}</ul>` : `<div class="empty">Every asset is on the map. Add more under Assets.</div>`}
@@ -678,7 +703,7 @@ const isoP = (x, y, z = 0) => ({ X: (x - y) * 0.866, Y: (x + y) * 0.5 - z });
 const f1 = n => n.toFixed(1);
 const isoPts = arr => arr.map(p => `${f1(p.X)},${f1(p.Y)}`).join(' ');
 // A solid box from z=0 up to h: its top and the two faces that face the camera (+x on the right, +y on the left).
-const isoBox = (x0, y0, x1, y1, h, cls = '') => `<g class="box ${cls}"><polygon class="fy" points="${isoPts([isoP(x0, y1), isoP(x1, y1), isoP(x1, y1, h), isoP(x0, y1, h)])}"/><polygon class="fx" points="${isoPts([isoP(x1, y0), isoP(x1, y1), isoP(x1, y1, h), isoP(x1, y0, h)])}"/><polygon class="ft" points="${isoPts([isoP(x0, y0, h), isoP(x1, y0, h), isoP(x1, y1, h), isoP(x0, y1, h)])}"/></g>`;
+const isoBox = (x0, y0, x1, y1, h, cls = '', z0 = 0) => `<g class="box ${cls}"><polygon class="fy" points="${isoPts([isoP(x0, y1, z0), isoP(x1, y1, z0), isoP(x1, y1, z0 + h), isoP(x0, y1, z0 + h)])}"/><polygon class="fx" points="${isoPts([isoP(x1, y0, z0), isoP(x1, y1, z0), isoP(x1, y1, z0 + h), isoP(x1, y0, z0 + h)])}"/><polygon class="ft" points="${isoPts([isoP(x0, y0, z0 + h), isoP(x1, y0, z0 + h), isoP(x1, y1, z0 + h), isoP(x0, y1, z0 + h)])}"/></g>`;
 // Every wall piece on a floor, cut wherever any room starts or ends and with door gaps carved; exterior when no room lies on its other side.
 function wallPieces(rooms, doors) {
   const groups = roomGroups(rooms); const out = [];
@@ -699,26 +724,30 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
   const gx0 = has ? Math.min(...xs) - 140 : 0, gy0 = has ? Math.min(...ys) - 140 : 0, gx1 = has ? Math.max(...xs) + 140 : MAP_W, gy1 = has ? Math.max(...ys) + 140 : MAP_H;
   const all = [];
   for (const r of rooms) all.push(isoP(r.x, r.y, ISO_H), isoP(r.x + r.w, r.y, ISO_H), isoP(r.x, r.y + r.h, -SLAB - 16), isoP(r.x + r.w, r.y + r.h, -SLAB - 16), isoP(r.x + r.w, r.y), isoP(r.x, r.y + r.h));
-  for (const p of placed) { all.push(isoP(p.x, p.y, 120), isoP(p.x - 30, p.y + 30, -20), isoP(p.x + 30, p.y - 30)); const T = isoP(p.x, p.y, 120); all.push({ X: T.X + 36 + shortName(p.a.name, 20).length * 9.2, Y: T.Y }); }
+  const indoor = rooms.filter(r => r.kind !== 'outdoor');
+  const baseZ = p => { const r = p.a.map.room ? rooms.find(x => roomKey(x) === p.a.map.room) : roomAt({ floor: p.a.map.floor, x: p.x, y: p.y }); return r && r.kind === 'outdoor' ? -SLAB : 0; };
+  for (const p of placed) { p.z0 = baseZ(p); const { w, d, h } = p.shape; all.push(isoP(p.x - w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y + d / 2, p.z0 - 6), isoP(p.x + w / 2, p.y - d / 2, p.z0 + h)); const T = isoP(p.x, p.y, p.z0 + h + 160); all.push(T, { X: T.X + 36 + shortName(p.a.name, 20).length * 9.2, Y: T.Y }); }
   if (!all.length) all.push(isoP(gx0, gy0), isoP(gx1, gy0), isoP(gx1, gy1), isoP(gx0, gy1));
   const minX = Math.min(...all.map(p => p.X)) - 36, maxX = Math.max(...all.map(p => p.X)) + 36, minY = Math.min(...all.map(p => p.Y)) - 36, maxY = Math.max(...all.map(p => p.Y)) + 36;
 
-  const groups = roomGroups(rooms); const pieces = wallPieces(rooms, doors);
-  const shadows = [], slab = [], floors = [], flat = [], ents = [], labels = [];
+  const groups = roomGroups(rooms); const pieces = wallPieces(indoor, doors);
+  const shadows = [], slab = [], floors = [], ground = [], flat = [], ents = [], labels = [];
   const taken = []; const free = r => !taken.some(t => r.x0 < t.x1 + 14 && r.x1 > t.x0 - 14 && r.y0 < t.y1 + 6 && r.y1 > t.y0 - 6);
   const claim = (cands, box) => { const hit = cands.find(c => free(box(c))) || cands[0]; taken.push(box(hit)); return hit; };
   for (const r of rooms) {
     const group = groups.get(roomKey(r)); const { color } = groupStyle(group); const cls = `room t${color}`;
+    if (r.kind === 'outdoor') { ground.push(`<g class="${cls}" data-room="${r.id}"><polygon class="floor outdoor" points="${isoPts([isoP(r.x, r.y, -SLAB), isoP(r.x + r.w, r.y, -SLAB), isoP(r.x + r.w, r.y + r.h, -SLAB), isoP(r.x, r.y + r.h, -SLAB)])}"/></g>`); continue; }
     shadows.push(`<polygon points="${isoPts([isoP(r.x, r.y, -SLAB - 14), isoP(r.x + r.w, r.y, -SLAB - 14), isoP(r.x + r.w, r.y + r.h, -SLAB - 14), isoP(r.x, r.y + r.h, -SLAB - 14)])}"/>`);
     floors.push(`<g class="${cls}" data-room="${r.id}"><polygon class="floor" points="${isoPts([isoP(r.x, r.y), isoP(r.x + r.w, r.y), isoP(r.x + r.w, r.y + r.h), isoP(r.x, r.y + r.h)])}"/></g>`);
   }
   // room names: biggest rooms claim their spot first; a name tries the back of its room, then the middle, then the front
   for (const r of rooms.filter(r => groupStyle(groups.get(roomKey(r))).main.id === r.id).sort((a, b) => b.w * b.h - a.w * a.h)) {
     const name = r.name.toUpperCase(); const w = name.length * 14.1; const sum = summary.get(roomKey(r)); const full = w + (sum ? 36 : 0);
-    const cx = r.x + r.w / 2; const cands = [[cx, r.y + 26], [cx, r.y + r.h / 2], [cx, r.y + r.h - 22], [cx, r.y + Math.min(r.h - 22, 70)]].map(([x, y]) => isoP(x, y));
+    const cx = r.x + r.w / 2, zr = r.kind === 'outdoor' ? -SLAB : 0; const spots = [[cx, r.y + 26], [cx, r.y + r.h / 2], [cx, r.y + r.h - 22], [cx, r.y + Math.min(r.h - 22, 70)]]; if (r.kind === 'outdoor') spots.splice(0, 4, spots[2], spots[1], spots[0]); // paved areas are named at the front, where the cars are not
+    const cands = spots.map(([x, y]) => isoP(x, y, zr));
     const L = claim(cands, c => ({ x0: c.X - full / 2, x1: c.X + full / 2, y0: c.Y - 12, y1: c.Y + 16 }));
     const bx = L.X - full / 2;
-    labels.push(`<g class="rlabel" data-focus="${esc(roomKey(r))}"><text class="room-label" x="${f1(bx)}" y="${f1(L.Y + 6)}">${esc(name)}</text><line class="rule" x1="${f1(bx)}" y1="${f1(L.Y + 14)}" x2="${f1(bx + w)}" y2="${f1(L.Y + 14)}"/>${badge(sum, bx + w + 8, L.Y - 10, 'start')}</g>`);
+    labels.push(`<g class="rlabel ${r.kind === 'outdoor' ? 'outdoor' : ''}" data-focus="${esc(roomKey(r))}"><text class="room-label" x="${f1(bx)}" y="${f1(L.Y + 6)}">${esc(name)}</text><line class="rule" x1="${f1(bx)}" y1="${f1(L.Y + 14)}" x2="${f1(bx + w)}" y2="${f1(L.Y + 14)}"/>${badge(sum, bx + w + 8, L.Y - 10, 'start')}</g>`);
   }
   for (const p of pieces) {
     if (p.ext && (p.side === 'bottom' || p.side === 'right')) slab.push(`<polygon class="${p.side === 'bottom' ? 'fy' : 'fx'}" points="${isoPts(p.side === 'bottom' ? [isoP(p.x0, p.y1), isoP(p.x1, p.y1), isoP(p.x1, p.y1, -SLAB), isoP(p.x0, p.y1, -SLAB)] : [isoP(p.x1, p.y0), isoP(p.x1, p.y1), isoP(p.x1, p.y1, -SLAB), isoP(p.x1, p.y0, -SLAB)])}"/>`);
@@ -730,12 +759,12 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
     }
   }
   for (const d of doors) { const { floor, leaf, depth } = isoDoor(d, wallAt(pieces, d)); flat.push(floor); if (leaf) ents.push({ d: depth, k: 0.5, html: leaf }); }
-  // callouts: back to front, each takes the lowest height whose label does not cover another label
+  // callouts: back to front, each takes the lowest height above its object whose label does not cover another label
   for (const p of placed.slice().sort((a, b) => a.x + a.y - b.x - b.y)) {
     const w = shortName(p.a.name, 20).length * 9.2 + 34;
-    p.up = claim([70, 98, 126, 154, 182, 210], up => { const T = isoP(p.x, p.y, up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
+    p.up = claim([40, 68, 96, 124, 152, 180], up => { const T = isoP(p.x, p.y, p.z0 + p.shape.h + up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
   }
-  for (const p of placed) { const m = isoMarker(p); ents.push({ d: p.x + p.y, k: 1, html: m.body }); labels.push(m.callout); }
+  for (const p of placed) { const m = isoObject(p); ents.push({ d: p.x + p.y, k: 1, html: m.body }); labels.push(m.callout); }
   ents.sort((p, q) => p.d - q.d || p.k - q.k);
   return `<svg id="map-svg" viewBox="${minX.toFixed(0)} ${minY.toFixed(0)} ${(maxX - minX).toFixed(0)} ${(maxY - minY).toFixed(0)}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="House map, isometric">
       <defs>
@@ -749,7 +778,7 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map()) {
         ${bgData ? `<image href="${bgData}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : ''}
         <rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#grid)"/><rect x="${gx0}" y="${gy0}" width="${gx1 - gx0}" height="${gy1 - gy0}" fill="url(#grid2)"/>
       </g>
-      <g class="shadow" filter="url(#soft)">${shadows.join('')}</g>
+      ${ground.join('')}<g class="shadow" filter="url(#soft)">${shadows.join('')}</g>
       <g class="slab">${slab.join('')}</g>
       ${floors.join('')}${flat.join('')}${ents.map(e => e.html).join('')}${labels.join('')}
     </svg>`;
@@ -766,20 +795,46 @@ function isoDoor(d, wall) {
   const leaf = h ? isoBox(jx - 1.5, jy, jx + 1.5, jy + d.w, H, 'leaf') : isoBox(jx, jy - 1.5, jx + d.w, jy + 1.5, H, 'leaf');
   return { floor, leaf: `<g class="door iso" data-door="${d.id}">${leaf}</g>`, depth: h ? jx + jy + d.w / 2 : jx + d.w / 2 + jy };
 }
-// A component: a raised plinth with its glyph and number, and a drafting callout (leader line up to the name) that hides when the floor is busy.
-function isoMarker({ a, x, y, auto, n, up = 70 }) {
-  const st = assetStatus(a.id); const s = 26, z = 7;
-  const B = isoP(x, y, z), G = isoP(x, y), T = isoP(x, y, up);
-  const name = shortName(a.name, 20).toUpperCase(); const w = name.length * 9.2 + 34;
-  const body = `<g class="marker iso ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
-      <ellipse class="halo" cx="${f1(G.X)}" cy="${f1(G.Y)}" rx="44" ry="22"/>
-      ${isoBox(x - s, y - s, x + s, y + s, z, 'plinth')}
-      <text class="glyph" x="${f1(B.X)}" y="${f1(B.Y + 11)}" text-anchor="middle">${assetIcon(a)}</text>
-      <g class="num"><circle cx="${f1(B.X + 22)}" cy="${f1(B.Y - 16)}" r="10"/><text x="${f1(B.X + 22)}" y="${f1(B.Y - 12)}" text-anchor="middle">${n || ''}</text></g>
+// Draw one component as a small model to scale, standing at (x, y) with its base at height z0: a car, an appliance, a tank, or a plain crate with its glyph.
+function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
+  const st = assetStatus(a.id); const { kind, w, d, h } = shape;
+  const x0 = x - w / 2, x1 = x + w / 2, y0 = y - d / 2, y1 = y + d / 2;
+  const B = (bx0, by0, bx1, by1, bz0, bz1, cls) => isoBox(bx0, by0, bx1, by1, bz1 - bz0, cls, z0 + bz0);
+  // a circle lying flat (plane z), or standing on a face that looks along +y or +x
+  const ring = (cx, cy, r, z, cls, plane = 'z') => { const pts = []; for (let i = 0; i < 16; i++) { const t = i / 16 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t); pts.push(plane === 'z' ? isoP(cx + r * c, cy + r * s, z0 + z) : plane === 'y' ? isoP(cx + r * c, cy, z0 + z + r * s) : isoP(cx, cy + r * c, z0 + z + r * s)); } return `<polygon class="${cls}" points="${isoPts(pts)}"/>`; };
+  const cyl = (cx, cy, r, hh, cls) => { const N = 14; let out = ''; const top = []; for (let i = 0; i < N; i++) { const t0 = i / N * 2 * Math.PI, t1 = (i + 1) / N * 2 * Math.PI; const nx = Math.cos((t0 + t1) / 2), ny = Math.sin((t0 + t1) / 2); top.push(isoP(cx + r * Math.cos(t0), cy + r * Math.sin(t0), z0 + hh)); if (nx + ny > 0) { const p0 = [cx + r * Math.cos(t0), cy + r * Math.sin(t0)], p1 = [cx + r * Math.cos(t1), cy + r * Math.sin(t1)]; out += `<polygon style="fill:color-mix(in srgb, var(--model-x) ${Math.round((nx + 1) * 50)}%, var(--model-y))" points="${isoPts([isoP(p0[0], p0[1], z0), isoP(p1[0], p1[1], z0), isoP(p1[0], p1[1], z0 + hh), isoP(p0[0], p0[1], z0 + hh)])}"/>`; } } return `<g class="${cls}">${out}<polygon class="ft" points="${isoPts(top)}"/></g>`; };
+  const glyph = (size, z) => { const G = isoP(x, y, z0 + z); return `<text class="glyph" x="${f1(G.X)}" y="${f1(G.Y + size * 0.36)}" text-anchor="middle" font-size="${size}">${shape.icon}</text>`; };
+  let parts = '';
+  if (kind === 'car') {
+    const clear = ft(0.8), roof = clear + ft(2.2), wr = ft(1.05), ins = w * 0.1;
+    parts += B(x0, y0, x1, y1, clear, roof, 'body');
+    parts += ring(x1 + 1, y0 + d * 0.2, wr, wr, 'wheel', 'x') + ring(x1 + 1, y1 - d * 0.2, wr, wr, 'wheel', 'x');
+    // the cabin: a prism with a raked windshield at the front (+y) and a sloped rear window
+    const cx0 = x0 + ins, cx1 = x1 - ins, cy0 = y0 + d * 0.3, cy1 = shape.tall ? y1 - d * 0.1 : y1 - d * 0.24, rake = d * 0.1, back = shape.tall ? d * 0.04 : d * 0.08;
+    const P = (px, py, pz) => isoP(px, py, z0 + pz);
+    parts += `<g class="cabin"><polygon class="fx" points="${isoPts([P(cx1, cy0, roof), P(cx1, cy1, roof), P(cx1, cy1 - rake, h), P(cx1, cy0 + back, h)])}"/><polygon class="fy" points="${isoPts([P(cx0, cy1, roof), P(cx1, cy1, roof), P(cx1, cy1 - rake, h), P(cx0, cy1 - rake, h)])}"/><polygon class="ft" points="${isoPts([P(cx0, cy0 + back, h), P(cx1, cy0 + back, h), P(cx1, cy1 - rake, h), P(cx0, cy1 - rake, h)])}"/></g>`;
+    for (const hx of [x0 + w * 0.12, x1 - w * 0.12]) parts += `<polygon class="lamp" points="${isoPts([P(hx - w * 0.09, y1 + 0.5, clear + ft(1.1)), P(hx + w * 0.09, y1 + 0.5, clear + ft(1.1)), P(hx + w * 0.09, y1 + 0.5, clear + ft(1.6)), P(hx - w * 0.09, y1 + 0.5, clear + ft(1.6))])}"/>`;
+    parts += `<line class="seam" x1="${f1(isoP(x0 + 3, y1 + 0.5, z0 + clear + ft(1.4)).X)}" y1="${f1(isoP(x0 + 3, y1 + 0.5, z0 + clear + ft(1.4)).Y)}" x2="${f1(isoP(x1 - 3, y1 + 0.5, z0 + clear + ft(1.4)).X)}" y2="${f1(isoP(x1 - 3, y1 + 0.5, z0 + clear + ft(1.4)).Y)}"/>`;
+  } else if (kind === 'washer' || kind === 'dryer') {
+    parts += B(x0, y0, x1, y1, 0, h, 'appliance') + B(x0, y0, x1, y0 + d * 0.2, h, h + ft(0.3), 'strip') + ring(x, y1 + 0.5, w * (kind === 'washer' ? 0.3 : 0.26), h * 0.45, 'port', 'y');
+  } else if (kind === 'fridge') {
+    const z = z0 + h * 0.64; const L = isoP(x0, y1 + 0.5, z), R = isoP(x1, y1 + 0.5, z);
+    parts += B(x0, y0, x1, y1, 0, h, 'appliance') + `<line class="seam" x1="${f1(L.X)}" y1="${f1(L.Y)}" x2="${f1(R.X)}" y2="${f1(R.Y)}"/>`;
+  } else if (kind === 'range') {
+    parts += B(x0, y0, x1, y1, 0, h, 'appliance'); for (const [dx, dy] of [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]]) parts += ring(x + dx * w, y + dy * d, w * 0.13, h + 0.5, 'burner');
+  } else if (kind === 'cyl') { parts += cyl(x, y, w / 2, h, 'tank'); }
+  else if (kind === 'fan') { parts += B(x0, y0, x1, y1, 0, h, 'appliance') + ring(x, y, w * 0.36, h + 0.5, 'burner'); }
+  else { parts += B(x0, y0, x1, y1, 0, h, 'crate') + glyph(Math.max(11, Math.min(30, Math.min(w, d) * 0.6)), h); }
+  const pad = isoPts([isoP(x0 - 4, y0 - 4, z0), isoP(x1 + 4, y0 - 4, z0), isoP(x1 + 4, y1 + 4, z0), isoP(x0 - 4, y1 + 4, z0)]);
+  const N = isoP(x1, y0, z0 + h); const Tp = isoP(x, y, z0 + h), T = isoP(x, y, z0 + h + up);
+  const name = shortName(a.name, 20).toUpperCase(); const cw = name.length * 9.2 + 34;
+  const body = `<g class="marker obj iso ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
+      <polygon class="pad" points="${pad}"/>${parts}
+      <g class="num"><circle cx="${f1(N.X + 9)}" cy="${f1(N.Y - 9)}" r="10"/><text x="${f1(N.X + 9)}" y="${f1(N.Y - 5)}" text-anchor="middle">${n || ''}</text></g>
     </g>`;
   const callout = `<g class="callout ${st.cls}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
-      <line class="leader" x1="${f1(B.X)}" y1="${f1(B.Y - 4)}" x2="${f1(T.X - 10)}" y2="${f1(T.Y)}"/>
-      <g class="ctext"><rect class="cbg" x="${f1(T.X - 10)}" y="${f1(T.Y - 12)}" width="${f1(w)}" height="24" rx="5"/>
+      <line class="leader" x1="${f1(Tp.X)}" y1="${f1(Tp.Y)}" x2="${f1(T.X - 10)}" y2="${f1(T.Y)}"/>
+      <g class="ctext"><rect class="cbg" x="${f1(T.X - 10)}" y="${f1(T.Y - 12)}" width="${f1(cw)}" height="24" rx="5"/>
       <circle class="cdot" cx="${f1(T.X + 2)}" cy="${f1(T.Y)}" r="4.5"/>
       <text class="clabel" x="${f1(T.X + 13)}" y="${f1(T.Y + 4.5)}">${esc(name)}</text></g>
     </g>`;
@@ -905,7 +960,7 @@ function setCam(svg, wrap, cam, animate = true) {
 function focusRoom(svg, wrap, key, animate = true) {
   const pieces = mapData().rooms.filter(r => r.floor === mapState.floor && roomKey(r) === key); if (!pieces.length) return;
   const pts = [];
-  for (const r of pieces) { const cs = [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]; for (const [x, y] of cs) { if (mapState.view === 'iso') { pts.push(isoP(x, y)); pts.push(isoP(x, y, ISO_H)); } else pts.push({ X: x, Y: y }); } }
+  for (const r of pieces) { const zr = r.kind === 'outdoor' ? -SLAB : 0; const cs = [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]]; for (const [x, y] of cs) { if (mapState.view === 'iso') { pts.push(isoP(x, y, zr - 6)); pts.push(isoP(x, y, zr + 110)); } else pts.push({ X: x, Y: y }); } }
   const x0 = Math.min(...pts.map(p => p.X)) - 40, x1 = Math.max(...pts.map(p => p.X)) + 40, y0 = Math.min(...pts.map(p => p.Y)) - 30, y1 = Math.max(...pts.map(p => p.Y)) + 50;
   const base = mapState.base; let w = x1 - x0, h = y1 - y0;
   if (w / h < base.w / base.h) w = h * base.w / base.h; else h = w * base.h / base.w;
@@ -940,7 +995,7 @@ function bindCamera(svg, wrap) {
 
 // Put a door on the nearest wall to the click, centered on the click and kept inside that stretch of wall.
 function placeDoor(p, w) {
-  const m = mapData(); const rooms = m.rooms.filter(r => r.floor === mapState.floor); const groups = roomGroups(rooms);
+  const m = mapData(); const rooms = m.rooms.filter(r => r.floor === mapState.floor && r.kind !== 'outdoor'); const groups = roomGroups(rooms);
   let best = null;
   for (const r of rooms) for (const e of roomEdges(r, groups.get(roomKey(r)))) {
     const horiz = e.y0 === e.y1, len = horiz ? e.x1 - e.x0 : e.y1 - e.y0; if (len < w) continue;
@@ -980,6 +1035,7 @@ document.addEventListener('click', async e => {
   else if (a === 'map-add-floor') { const f = { id: uid(), name: `Floor ${m.floors.length + 1}` }; mapState.floor = f.id; saveMap({ floors: [...m.floors, f] }); const inp = $('[data-map="floor-name"]'); if (inp) { inp.focus(); inp.select(); } }
   else if (a === 'map-del-floor') { if (m.floors.length > 1 && confirm(`Delete ${floorName(mapState.floor)}?`)) { const bg = { ...m.bg }; delete bg[mapState.floor]; const floors = m.floors.filter(f => f.id !== mapState.floor); const doors = m.doors.filter(d => d.floor !== mapState.floor); mapState.floor = floors[0].id; await saveMap({ floors, bg, doors }); } }
   else if (a === 'map-del-room') { if (confirm('Delete this piece of the layout? Components stay where they are.')) { const id = mapState.selected; mapState.selected = null; await saveMap({ rooms: m.rooms.filter(r => r.id !== id) }); } }
+  else if (a === 'map-room-kind') { const cur = m.rooms.find(r => r.id === mapState.selected); if (cur) await saveMap({ rooms: m.rooms.map(r => { if (!(r.floor === cur.floor && roomKey(r) === roomKey(cur))) return r; const { kind, ...rest } = r; return el.dataset.value ? { ...rest, kind: el.dataset.value } : rest; }) }); }
   else if (a === 'map-room-color') { const cur = m.rooms.find(r => r.id === mapState.selected); if (cur) await saveMap({ rooms: m.rooms.map(r => r.floor === cur.floor && roomKey(r) === roomKey(cur) ? { ...r, color: Number(el.dataset.value) } : r) }); }
   else if (a === 'map-load-house') { await loadHouseLayout(); }
   else if (a === 'map-place') { mapState.placing = el.dataset.id; mapState.mode = 'edit'; if (state.route.view !== 'map') location.hash = '#/map'; else render(); }
