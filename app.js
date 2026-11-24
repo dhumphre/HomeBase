@@ -811,7 +811,7 @@ function map() {
   // plan doors: a sill across the gap, and for a hinged door its leaf and swing arc
   const doorsSvg = doors.map(d => {
     const h = d.dir === 'h', hw = d.w / 2, x0 = h ? d.x - hw : d.x, y0 = h ? d.y : d.y - hw, x1 = h ? d.x + hw : d.x, y1 = h ? d.y : d.y + hw;
-    const leaf = d.w >= 80 ? '' : h ? `<path class="swing" d="M${x0} ${y0 + d.w}A${d.w} ${d.w} 0 0 0 ${x1} ${y0}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + d.w}"/>` : `<path class="swing" d="M${x0 + d.w} ${y0}A${d.w} ${d.w} 0 0 1 ${x0} ${y1}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0 + d.w}" y2="${y0}"/>`;
+    const leaf = d.open || d.w >= 80 ? '' : h ? `<path class="swing" d="M${x0} ${y0 + d.w}A${d.w} ${d.w} 0 0 0 ${x1} ${y0}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y0 + d.w}"/>` : `<path class="swing" d="M${x0 + d.w} ${y0}A${d.w} ${d.w} 0 0 1 ${x0} ${y1}"/><line class="leaf" x1="${x0}" y1="${y0}" x2="${x0 + d.w}" y2="${y0}"/>`;
     return `<g class="door" data-door="${d.id}"><line class="sill" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"/>${leaf}${edit ? `<rect class="hit" x="${d.x - hw - 6}" y="${d.y - hw - 6}" width="${d.w + 12}" height="${d.w + 12}"/>` : ''}</g>`; }).join('');
   const markersSvg = placed.map(({ a, x, y, auto, n, shape }) => { const st = assetStatusDeep(a.id); const { w, d } = shape; const gs = Math.max(11, Math.min(26, Math.min(w, d) * 0.6)); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
       <rect class="foot" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" rx="3"/>
@@ -973,7 +973,7 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map(), opts = {}) {
 }
 // A door: its swing arc drawn on the floor, a threshold across the gap, and (unless it is a wide opening) a leaf standing open at one jamb.
 function isoDoor(d, wall) {
-  const h = d.dir === 'h', hw = d.w / 2, H = wall ? wall.h : ISO_L, wide = d.w >= 80;
+  const h = d.dir === 'h', hw = d.w / 2, H = wall ? wall.h : ISO_L, wide = d.open || d.w >= 80;
   const sill = h ? [isoP(d.x - hw, d.y - 3), isoP(d.x + hw, d.y - 3), isoP(d.x + hw, d.y + 3), isoP(d.x - hw, d.y + 3)] : [isoP(d.x - 3, d.y - hw), isoP(d.x + 3, d.y - hw), isoP(d.x + 3, d.y + hw), isoP(d.x - 3, d.y + hw)];
   const jx = h ? d.x - hw : d.x, jy = h ? d.y : d.y - hw;
   // the swing arc, drawn in plan space inside the transformed group
@@ -1311,16 +1311,26 @@ function placeDoor(p, w) {
   const m = mapData(); const rooms = m.rooms.filter(r => r.floor === mapState.floor && r.kind !== 'outdoor'); const groups = roomGroups(rooms);
   let best = null;
   for (const r of rooms) for (const e of roomEdges(r, groups.get(roomKey(r)))) {
-    const horiz = e.y0 === e.y1, len = horiz ? e.x1 - e.x0 : e.y1 - e.y0; if (len < w) continue;
+    const horiz = e.y0 === e.y1;
     const t = horiz ? Math.min(Math.max(p.x, e.x0), e.x1) : Math.min(Math.max(p.y, e.y0), e.y1);
     const dist = horiz ? Math.hypot(p.x - t, p.y - e.y0) : Math.hypot(p.x - e.x0, p.y - t);
     if (dist <= 16 && (!best || dist < best.dist)) best = { dist, e, horiz, t };
   }
   if (!best) { toast('Click closer to a wall'); return; }
-  const { e, horiz } = best; const lo = (horiz ? e.x0 : e.y0) + w / 2, hi = (horiz ? e.x1 : e.y1) - w / 2;
-  const c = Math.min(Math.max(Math.round(best.t / SNAP) * SNAP, lo), hi);
-  const d = { id: uid(), floor: mapState.floor, x: horiz ? c : e.x0, y: horiz ? e.y0 : c, dir: horiz ? 'h' : 'v', w };
-  saveMap({ doors: [...m.doors, d] });
+  // the stretch of this wall that faces the same room as the click (or the outside): an opening stays between the two rooms it joins
+  const { e, horiz } = best; const nx = horiz ? 0 : e.side === 'left' ? -1 : 1, ny = horiz ? (e.side === 'top' ? -1 : 1) : 0;
+  const lo0 = horiz ? e.x0 : e.y0, hi0 = horiz ? e.x1 : e.y1;
+  const across = v => { const x = (horiz ? v : e.x0) + nx * 0.5, y = (horiz ? e.y0 : v) + ny * 0.5; const o = rooms.find(o => x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h); return o ? roomKey(o) : null; };
+  const t0 = Math.min(Math.max(best.t, lo0 + 1), hi0 - 1); const who = across(t0);
+  let a = t0, b = t0; while (a - 1 > lo0 && across(a - 1) === who) a = Math.max(lo0, a - SNAP / 2); while (b + 1 < hi0 && across(b + 1) === who) b = Math.min(hi0, b + SNAP / 2);
+  a = Math.max(lo0, Math.round(a / SNAP) * SNAP); b = Math.min(hi0, Math.round(b / SNAP) * SNAP);
+  const width = Math.min(w, b - a); // a wall shorter than the opening is opened along its whole length
+  if (width < 20) { toast('That stretch of wall is too short for an opening'); return; }
+  const c = Math.min(Math.max(Math.round(best.t / SNAP) * SNAP, a + width / 2), b - width / 2);
+  const d = { id: uid(), floor: mapState.floor, x: horiz ? c : e.x0, y: horiz ? e.y0 : c, dir: horiz ? 'h' : 'v', w: width, ...(w >= 80 ? { open: true } : {}) }; // open: a doorless opening, however narrow the wall made it
+  // a new opening replaces a door that sits wholly inside it on the same wall line (a door that only overlaps it stays)
+  const inside = o => o.floor === d.floor && o.dir === d.dir && (horiz ? o.y === d.y : o.x === d.x) && Math.abs((horiz ? o.x - d.x : o.y - d.y)) + o.w / 2 <= d.w / 2;
+  saveMap({ doors: [...m.doors.filter(o => !inside(o)), d] });
 }
 
 async function mapBackground(file) {
