@@ -32,6 +32,7 @@
   <div id="shell" class="shell" hidden>
     <aside class="sidebar">
       <a class="wordmark" href="#/"><span class="mark"></span>Home Base</a>
+      <button class="search-trigger" type="button" data-action="find" aria-label="Search (Ctrl+K)"><span class="ico" aria-hidden="true">⌕</span><span class="lbl">Search</span><kbd>Ctrl K</kbd></button>
       <nav class="nav" id="nav"></nav>
       <div class="sidebar-foot">
         <button id="new-btn" class="btn primary small" type="button">+ New</button>
@@ -60,6 +61,19 @@
     <h2>What are you adding?</h2>
     <div class="picker-grid" id="picker-grid"></div>
     <button class="btn" type="button" data-close>Cancel</button>
+  </dialog>
+
+  <!-- Finder: search everything (Ctrl+K or /) -->
+  <dialog id="finder" class="finder" aria-label="Search">
+    <div class="finder-bar">
+      <span class="ico" aria-hidden="true">⌕</span>
+      <button id="finder-scope" class="finder-scope" type="button" title="Search everywhere" hidden></button>
+      <input id="finder-q" type="text" role="combobox" aria-controls="finder-results" aria-expanded="true" aria-autocomplete="list" placeholder="Find a thing, a part number, a room…" autocomplete="off" spellcheck="false">
+      <kbd>Esc</kbd>
+    </div>
+    <div id="finder-chips" class="finder-chips" aria-label="Search one room"></div>
+    <ul id="finder-results" class="finder-results" role="listbox" aria-label="Results"></ul>
+    <footer class="finder-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> show on map</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> open page</span><span><kbd>Tab</kbd> look inside a room</span></footer>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

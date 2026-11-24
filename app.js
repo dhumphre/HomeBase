@@ -805,7 +805,7 @@ function map() {
     return `<g class="room t${color} ${sel && sel.id === r.id ? 'sel' : ''}" data-room="${r.id}">
       <rect class="floor ${r.kind === 'outdoor' ? 'outdoor' : ''}" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"/>
       <path class="wall ${r.kind === 'outdoor' ? 'curb' : ''}" d="${roomEdges(r, group, doors).map(e => `M${e.x0} ${e.y0}L${e.x1} ${e.y1}`).join('')}"/>
-      ${main.id === r.id ? `<text class="room-label" x="${r.x + r.w / 2}" y="${r.y + 24}" text-anchor="middle" data-focus="${esc(roomKey(r))}">${esc(r.name.toUpperCase())}</text>${badge(summary.get(roomKey(r)), r.x + r.w / 2, r.y + 32)}` : ''}
+      ${main.id === r.id ? `<g class="plabel" data-focus="${esc(roomKey(r))}"><text class="room-label" x="${r.x + r.w / 2}" y="${r.y + 24}" text-anchor="middle">${esc(r.name.toUpperCase())}</text>${badge(summary.get(roomKey(r)), r.x + r.w / 2, r.y + 32)}</g>` : ''}
       ${edit ? `<rect class="handle" data-handle="${r.id}" x="${r.x + r.w - 14}" y="${r.y + r.h - 14}" width="14" height="14" rx="3"/>` : ''}
     </g>`; }).join('');
   // plan doors: a sill across the gap, and for a hinged door its leaf and swing arc
@@ -854,7 +854,7 @@ function map() {
       <section class="card"><header><h2>On ${esc(floor.name)}</h2><span class="more">${placed.length}</span></header>
         ${statusRows.length ? `<ul class="rows keyed">${statusRows.map(({ a, n, st }) => `<li data-hl="${a.id}"><span class="key">${n}</span><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc((assetRoom(a) || {}).name || 'pinned')} · ${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>${st.parts.map(c => `<li class="part" data-hl="${a.id}"><span class="key dim">↳</span><a class="t" href="#/assets/${c.id}">${assetIcon(c)} ${esc(c.name)}<span class="sub">in ${esc(a.name)} · ${esc(assetStatus(c.id).label)}</span></a><i class="dot ${assetStatus(c.id).cls}"></i></li>`).join('')}`).join('')}</ul>` : `<div class="empty">Nothing on this floor yet. Give an asset a room (edit the asset, or Edit layout here) and it appears.</div>`}
       </section>
-      <section class="card"><header><h2>Reading the drawing</h2></header><div class="map-panel"><p class="hint">Scroll or pinch to zoom, drag to pan. Click a room name to zoom into it, double-click empty ground to zoom out. Numbers on the plinths match the list. Hover a component for its status; click it for a card with what is inside it, and use Open page when you want to leave the map.</p></div></section>`;
+      <section class="card"><header><h2>Reading the drawing</h2></header><div class="map-panel"><p class="hint">Scroll or pinch to zoom, drag to pan. Hover a room to see its name; click the name, or double-click the floor, to zoom into it. Double-click empty ground to zoom out. Ctrl+K searches everything. Numbers on the plinths match the list. Hover a component for its status; click it for a card with what is inside it, and use Open page when you want to leave the map.</p></div></section>`;
 
   // the plan fits the rooms when just looking; editing shows the whole canvas so there is room to draw
   const pb = edit || !rooms.length ? [0, 0, MAP_W, MAP_H] : (() => { const x0 = Math.max(0, Math.min(...rooms.map(r => r.x)) - 40), y0 = Math.max(0, Math.min(...rooms.map(r => r.y)) - 40); return [x0, y0, Math.min(MAP_W, Math.max(...rooms.map(r => r.x + r.w)) + 40) - x0, Math.min(MAP_H, Math.max(...rooms.map(r => r.y + r.h)) + 40) - y0]; })();
@@ -873,6 +873,7 @@ function map() {
         <div class="map-tip" id="map-tip" hidden></div>
         <div class="map-card" id="map-card" hidden></div>
         <button type="button" class="btn small map-reset" data-action="map-reset" hidden>Whole floor</button>
+        ${edit ? '' : `<button type="button" class="map-find" data-action="find"><span class="ico" aria-hidden="true">⌕</span>Find something<kbd>Ctrl K</kbd></button>`}
         <div class="sheet-title"><b>${esc(floor.name)}</b><span>${new Set(rooms.map(roomKey)).size} rooms · ${placed.length} component${placed.length === 1 ? '' : 's'}${doors.length ? ` · ${doors.length} doors` : ''}</span><span>${edit ? 'Editing layout' : iso ? 'Isometric · 30°' : 'Plan'} · Home Base</span></div>
       </div>
       <aside class="map-side">${panel}</aside>
@@ -1097,6 +1098,14 @@ function bindMap() {
   const clamp = (v, max) => Math.max(0, Math.min(max, v));
   const room = id => mapData().rooms.find(r => r.id === id);
 
+  // room names stay out of the way until the pointer is over the room (or a component in it); a tap does the same on a touch screen
+  const roomUnder = el => {
+    const f = el.closest && el.closest('[data-focus]'); if (f) return f.dataset.focus;
+    const rm = el.closest && el.closest('[data-room]'); if (rm) { const r = room(rm.dataset.room); return r ? roomKey(r) : null; }
+    const mk = el.closest && el.closest('[data-asset]'); const a = mk && store.assets[mk.dataset.asset]; const r = a && assetRoom(hostOf(a) || a); return r ? roomKey(r) : null;
+  };
+  let shownRoom = null;
+  const showRoom = key => { if (key === shownRoom) return; shownRoom = key; svg.querySelectorAll('[data-focus].show').forEach(l => l.classList.remove('show')); if (key) svg.querySelectorAll(`[data-focus="${CSS.escape(key)}"]`).forEach(l => l.classList.add('show')); };
   const card = $('#map-card');
   const light = id => { svg.querySelectorAll('.lit').forEach(m => m.classList.remove('lit')); if (id) svg.querySelectorAll(`[data-asset="${id}"]`).forEach(mk => mk.classList.add('lit')); };
   // select a component: open its card, light where it stands (its host, if it is docked), and optionally bring the camera to it
@@ -1132,10 +1141,11 @@ function bindMap() {
       return;
     }
     const g = e.target.closest('[data-asset]'); const hid = g ? g.dataset.asset : null;
+    showRoom(roomUnder(e.target));
     if (hid !== mapState.hover) { svg.querySelectorAll('.hov').forEach(m => m.classList.remove('hov')); if (hid) svg.querySelectorAll(`[data-asset="${hid}"]`).forEach(m => m.classList.add('hov')); mapState.hover = hid; }
     showTip(hid, e);
   });
-  svg.addEventListener('pointerleave', () => { if (!mapState.drag) tip.hidden = true; svg.querySelectorAll('.hov').forEach(m => m.classList.remove('hov')); mapState.hover = null; });
+  svg.addEventListener('pointerleave', () => { showRoom(null); if (!mapState.drag) tip.hidden = true; svg.querySelectorAll('.hov').forEach(m => m.classList.remove('hov')); mapState.hover = null; });
 
   svg.addEventListener('pointercancel', e => { if (mapState.drag && e.pointerId === mapState.drag.pointerId) { mapState.drag = null; render(); } });
   svg.addEventListener('pointerdown', e => {
@@ -1195,6 +1205,7 @@ function bindMap() {
     if (mapState.mode !== 'view' || mapState.panned) return;
     const target = e.target === svg ? document.elementFromPoint(e.clientX, e.clientY) || e.target : e.target; // in case the pointer was captured
     const f = target.closest('[data-focus]'); if (f) { focusRoom(svg, wrap, f.dataset.focus); return; }
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') showRoom(roomUnder(target));
     const g = target.closest('[data-asset]'); if (g) selectAsset(g.dataset.asset); else if (mapState.sel) closeCard();
   });
   document.addEventListener('keydown', function onKey(e) {
@@ -1225,6 +1236,7 @@ function setCam(svg, wrap, cam, animate = true) {
   }
   const target = cam || base; const from = vbOf(svg);
   mapState.cam = cam ? { ...cam, floor: mapState.floor, view: mapState.view } : null;
+  svg.querySelectorAll('[data-focus].pin').forEach(l => l.classList.remove('pin'));
   wrap.classList.toggle('zoomed', !!cam && base.w / target.w >= 1.8);
   const box = svg.getBoundingClientRect(); const ppu = Math.min(box.width / target.w, box.height / target.h) || 1; // screen pixels per map unit
   wrap.style.setProperty('--lscale', Math.min(1, 1.1 / ppu).toFixed(3)); // labels keep a readable size on screen as the camera comes closer
@@ -1243,6 +1255,7 @@ function focusRoom(svg, wrap, key, animate = true) {
   const base = mapState.base; let w = x1 - x0, h = y1 - y0;
   if (w / h < base.w / base.h) w = h * base.w / base.h; else h = w * base.h / base.w;
   setCam(svg, wrap, { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h }, animate);
+  if (mapState.cam) svg.querySelectorAll(`[data-focus="${CSS.escape(key)}"]`).forEach(l => l.classList.add('pin'));
 }
 function focusAsset(svg, wrap, id, animate = true) {
   const p = resolvePlaced(mapState.floor).find(p => p.a.id === id && !p.lost); if (!p) return;
@@ -1577,6 +1590,151 @@ document.addEventListener('click', e => {
   const a = e.target.closest('a.wiki.missing'); if (!a) return;
   e.preventDefault(); openEditor('pages', { slug: slugify(a.dataset.title) }, { title: a.dataset.title });
 });
+
+// ---------------------------------------------------------------- finder (Ctrl+K)
+// One box that finds anything: a thing by its name, type, model, serial, specs or notes, or by where it is ("garage", "fridge"),
+// and the to-dos, tasks, log entries, pages and projects that mention it. Every word must match somewhere; names count most.
+// A room chip narrows the search to one room. Enter shows a thing on the map, lit and with its card open.
+const finder = { q: '', scope: null, sel: 0, items: [] };
+const fnorm = s => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '');
+const stem = w => w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+// how well one query word fits one field: a whole word, the start of a word, anywhere inside, or (fuzzy fields only) its letters in order
+function wordScore(field, w, fuzzy) {
+  if (!field) return 0;
+  for (const x of w === stem(w) ? [w] : [w, stem(w)]) {
+    const at = field.indexOf(x); if (at < 0) continue;
+    const start = at === 0 || /[^a-z0-9]/.test(field[at - 1]); const end = at + x.length >= field.length || /[^a-z0-9]/.test(field[at + x.length]);
+    return start && end ? 3 : start ? 2 : 1;
+  }
+  if (fuzzy && w.length >= 3) { let k = 0; for (const ch of field) if (ch === w[k] && ++k === w.length) return 0.4; }
+  return 0;
+}
+// fields: [[text, weight, fuzzy?], ...]; 0 unless every word lands somewhere
+function scoreFields(fields, words) {
+  let total = 0;
+  for (const w of words) { let best = 0; for (const [t, wt, fz] of fields) best = Math.max(best, wordScore(t, w, fz) * wt); if (!best) return 0; total += best; }
+  return total;
+}
+// the matched words marked in a piece of text
+function hl(text, words) {
+  const t = String(text ?? ''); if (!words.length) return esc(t);
+  const n = fnorm(t); const marks = new Array(t.length).fill(false);
+  for (const w of words) for (const x of new Set([w, stem(w)])) { let i = n.indexOf(x); while (i >= 0) { for (let k = i; k < i + x.length && k < t.length; k++) marks[k] = true; i = n.indexOf(x, i + x.length); } }
+  let out = '', on = false; for (let k = 0; k < t.length; k++) { if (marks[k] !== on) { out += on ? '</mark>' : '<mark>'; on = marks[k]; } out += esc(t[k]); } return out + (on ? '</mark>' : '');
+}
+// where a thing is, as a path: floor (when there are several) › room › the things it sits inside
+function placeOf(a) {
+  const chain = []; let p = a.parent ? store.assets[a.parent] : null;
+  for (let i = 0; p && i < 12; i++) { chain.unshift(p.name); p = p.parent ? store.assets[p.parent] : null; }
+  const carrier = hostOf(a) || (a.map ? a : null); const r = carrier ? assetRoom(carrier) : null;
+  const floor = carrier && carrier.map && mapData().floors.length > 1 ? floorName(carrier.map.floor) : '';
+  return { room: r, key: r ? `${r.floor}|${roomKey(r)}` : '', path: [floor, r ? r.name : (carrier && carrier.map ? 'Pinned on the map' : ''), ...chain].filter(Boolean) };
+}
+function finderRooms() {
+  const seen = new Map();
+  for (const r of mapData().rooms) { const k = `${r.floor}|${roomKey(r)}`; if (!seen.has(k)) seen.set(k, { key: k, floor: r.floor, name: r.name, n: 0 }); }
+  for (const a of list('assets')) { const k = placeOf(a).key; if (seen.has(k)) seen.get(k).n++; }
+  return [...seen.values()].sort((x, y) => y.n - x.n || x.name.localeCompare(y.name));
+}
+function finderSearch() {
+  const words = fnorm(finder.q).split(/[^a-z0-9.#/-]+/).filter(Boolean); const scope = finder.scope;
+  const groups = []; const rooms = finderRooms();
+  if (!scope && words.length) {
+    const hits = rooms.map(r => ({ r, s: scoreFields([[fnorm(r.name), 10, true], [fnorm(floorName(r.floor)), 2]], words) })).filter(x => x.s).sort((x, y) => y.s - x.s).slice(0, 4);
+    if (hits.length) groups.push(['Rooms', hits.map(({ r }) => ({ kind: 'room', id: r.key, html: `<span class="glyph">▦</span><span class="t"><span class="nm">${hl(r.name, words)}</span><span class="sub">${esc(floorName(r.floor))} · ${r.n} thing${r.n === 1 ? '' : 's'}</span></span><span class="go">Tab to look inside · Enter to zoom</span>` }))]);
+  }
+  const things = [];
+  for (const a of list('assets')) {
+    const pl = placeOf(a); if (scope && pl.key !== scope) continue;
+    const s = words.length ? scoreFields([[fnorm(a.name), 10, true], [fnorm(`${a.type || ''} ${a.make || ''}`), 5], [fnorm(`${a.serial || ''} ${a.specs || ''} ${a.contact || ''}`), 3], [fnorm(pl.path.join(' ')), 3], [fnorm(a.area), 2], [fnorm(a.notes), 1]], words) : 1;
+    if (!s) continue;
+    // say why it matched when the name alone does not show it
+    const nameHit = words.every(w => wordScore(fnorm(a.name), w, false));
+    const extra = !words.length || nameHit ? '' : [a.type, a.make, a.specs, a.serial].map(x => String(x || '')).find(x => words.some(w => fnorm(x).includes(stem(w)))) || '';
+    const st = assetStatus(a.id); const onMap = !!(pl.room || hostOf(a) || (a.map && a.map.x != null));
+    things.push({ s: s + (a.parent ? 0 : 0.5), name: words.length ? a.name : [...pl.path, a.name].join(' › '), kind: 'asset', id: a.id, // unfiltered, a part lists right under what it is in
+      html: `<span class="glyph">${assetIcon(a)}</span><span class="t"><span class="nm">${hl(a.name, words)}</span><span class="sub">${pl.path.length ? `<span class="path">${pl.path.map(x => hl(x, words)).join('<i>›</i>')}</span>` : '<span class="path dim">Not on the map</span>'}${extra ? ` · ${hl(shortName(extra, 48), words)}` : ''}</span></span><i class="dot ${st.cls}" title="${esc(st.label)}"></i><span class="go">${onMap ? 'Show on map' : 'Open'}</span>` });
+  }
+  things.sort((x, y) => (words.length ? y.s - x.s : 0) || String(x.name).localeCompare(String(y.name)));
+  if (things.length) groups.push([scope ? `In ${(rooms.find(r => r.key === scope) || {}).name || 'this room'}` : 'Things', things.slice(0, words.length ? 12 : 80)]);
+  if (words.length) {
+    const inScope = id => !scope || !!(id && store.assets[id] && placeOf(store.assets[id]).key === scope);
+    const other = (coll, label, glyph, title, sub, more) => {
+      const hits = list(coll).filter(x => inScope(x.asset)).map(x => ({ x, s: scoreFields([[fnorm(x[title]), 8, true], [fnorm(assetName(x.asset)), 3], [fnorm(more(x)), 1]], words) })).filter(h => h.s).sort((p, q) => q.s - p.s).slice(0, 5);
+      if (hits.length) groups.push([label, hits.map(({ x }) => ({ kind: coll, id: x.id, html: `<span class="glyph">${glyph}</span><span class="t"><span class="nm">${hl(x[title], words)}</span><span class="sub">${esc(sub(x))}</span></span>` }))]);
+    };
+    other('todos', 'To-dos', '☐', 'name', x => [x.status, assetName(x.asset), x.due && `due ${fmtDate(x.due)}`].filter(Boolean).join(' · '), x => `${x.notes || ''} ${x.area || ''}`);
+    other('schedule', 'Schedule', '↻', 'task', x => [assetName(x.asset), intervalText(x), x.nextDue && `next ${fmtDate(x.nextDue)}`].filter(Boolean).join(' · '), x => `${x.notes || ''} ${x.area || ''}`);
+    other('log', 'Log', '✓', 'item', x => [fmtDate(x.date), assetName(x.asset), x.cost ? money(x.cost) : ''].filter(Boolean).join(' · '), x => `${x.notes || ''} ${x.area || ''} ${x.doneBy || ''}`);
+    if (!scope) {
+      other('pages', 'Pages', '¶', 'title', x => x.area || 'Page', x => x.body || '');
+      other('projects', 'Projects', '◆', 'name', x => [x.status, x.summary].filter(Boolean).join(' · '), x => `${x.summary || ''} ${x.tags || ''} ${x.body || ''}`);
+    }
+  }
+  return { groups, rooms, words };
+}
+function renderFinder() {
+  const { groups, rooms, words } = finderSearch();
+  finder.items = groups.flatMap(([, items]) => items); finder.sel = Math.min(finder.sel, Math.max(0, finder.items.length - 1));
+  const sc = rooms.find(r => r.key === finder.scope);
+  $('#finder-scope').hidden = !sc; $('#finder-scope').innerHTML = sc ? `${esc(sc.name)}<span aria-hidden="true">×</span>` : '';
+  $('#finder-chips').innerHTML = rooms.filter(r => r.n).map(r => `<button type="button" data-scope="${esc(r.key)}" aria-pressed="${r.key === finder.scope}">${esc(r.name)}<span>${r.n}</span></button>`).join('');
+  let i = 0;
+  $('#finder-results').innerHTML = groups.length
+    ? groups.map(([label, items]) => `<li class="fgroup" role="presentation"><span>${esc(label)}</span>${sc && label.startsWith('In ') ? `<button type="button" class="link" data-zoom="${esc(finder.scope)}">Zoom in on the map</button>` : ''}</li>${items.map(it => `<li role="option" id="fr-${i}" data-i="${i}" aria-selected="${i++ === finder.sel}">${it.html}</li>`).join('')}`).join('')
+    : `<li class="fempty">${words.length ? `Nothing matches <b>${esc(finder.q)}</b>${sc ? ` in ${esc(sc.name)}. <button type="button" class="link" data-unscope>Search everywhere</button>` : '.'}` : sc ? `Nothing in ${esc(sc.name)} yet.` : 'Type to search, or pick a room.'}</li>`;
+  $('#finder-q').setAttribute('aria-activedescendant', finder.items.length ? `fr-${finder.sel}` : '');
+  $('#finder-q').placeholder = sc ? `Search ${sc.name}…` : 'Find a thing, a part number, a room…';
+  const cur = $(`#fr-${finder.sel}`); if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+function openFinder(scope) {
+  const d = $('#finder'); if (!state.user) return;
+  const pin = state.route.view === 'map' && document.querySelector('#map-svg [data-focus].pin'); // zoomed into a room: the search starts there
+  finder.scope = scope !== undefined ? scope : pin ? `${mapState.floor}|${pin.dataset.focus}` : null;
+  finder.sel = 0; renderFinder();
+  if (!d.open) d.showModal();
+  const q = $('#finder-q'); q.value = finder.q; q.focus(); q.select();
+}
+function goMap() { if (state.route.view === 'map') render(); else location.hash = '#/map'; }
+function finderGo(it, alt = false) {
+  if (!it) return; $('#finder').close(); finder.q = '';
+  if (it.kind === 'asset') {
+    const a = store.assets[it.id]; const carrier = a && (hostOf(a) || (a.map ? a : null));
+    const there = carrier && resolvePlaced(carrier.map.floor).some(p => !p.lost && p.a.id === carrier.id);
+    if (alt || !there) { location.hash = `#/assets/${it.id}`; return; }
+    Object.assign(mapState, { floor: carrier.map.floor, mode: 'view', sel: it.id, focusAsset: it.id, cam: null, placing: null, tool: null }); goMap();
+  } else if (it.kind === 'room') { const [floor, ...k] = it.id.split('|'); Object.assign(mapState, { floor, mode: 'view', focus: k.join('|'), sel: null, cam: null, placing: null, tool: null }); goMap(); }
+  else if (it.kind === 'pages') { const p = store.pages[it.id]; location.hash = `#/pages/${p.slug || slugify(p.title)}`; }
+  else if (it.kind === 'projects') location.hash = `#/projects/${it.id}`;
+  else openEditor(it.kind, store[it.kind][it.id]);
+}
+const finderMove = d => { const n = finder.items.length; if (n) { finder.sel = (finder.sel + d + n) % n; renderFinder(); } };
+const finderScope = key => { finder.scope = key; finder.q = $('#finder-q').value = ''; finder.sel = 0; renderFinder(); $('#finder-q').focus(); };
+$('#finder-q').addEventListener('input', e => { finder.q = e.target.value; finder.sel = 0; renderFinder(); });
+$('#finder-q').addEventListener('keydown', e => {
+  const it = finder.items[finder.sel];
+  if (e.key === 'ArrowDown') { e.preventDefault(); finderMove(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); finderMove(-1); }
+  else if (e.key === 'Enter') { e.preventDefault(); finderGo(it, e.shiftKey || e.ctrlKey || e.metaKey); }
+  else if (e.key === 'Backspace' && !e.target.value && finder.scope) { e.preventDefault(); finder.scope = null; renderFinder(); }
+  else if (e.key === 'Tab' && !e.shiftKey && it && it.kind === 'room') { e.preventDefault(); finderScope(it.id); } // Tab on a room: look inside it
+});
+$('#finder').addEventListener('click', e => {
+  if (e.target === e.currentTarget) { e.currentTarget.close(); return; } // a click on the backdrop
+  const chip = e.target.closest('[data-scope]'); if (chip) { finderScope(finder.scope === chip.dataset.scope ? null : chip.dataset.scope); return; }
+  if (e.target.closest('#finder-scope') || e.target.closest('[data-unscope]')) { finder.scope = null; renderFinder(); $('#finder-q').focus(); return; }
+  const z = e.target.closest('[data-zoom]'); if (z) { finderGo({ kind: 'room', id: z.dataset.zoom }); return; }
+  const li = e.target.closest('[data-i]'); if (li) finderGo(finder.items[Number(li.dataset.i)], e.shiftKey || e.ctrlKey || e.metaKey);
+});
+$('#finder-results').addEventListener('pointermove', e => {
+  const li = e.target.closest('[data-i]'); if (!li || Number(li.dataset.i) === finder.sel) return;
+  finder.sel = Number(li.dataset.i); $('#finder-results').querySelectorAll('[aria-selected="true"]').forEach(x => x.setAttribute('aria-selected', 'false')); li.setAttribute('aria-selected', 'true'); $('#finder-q').setAttribute('aria-activedescendant', li.id);
+});
+document.addEventListener('keydown', e => {
+  const typing = /input|textarea|select/i.test(e.target.tagName) || e.target.isContentEditable;
+  if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing && !$('#editor').open && !$('#picker').open)) { if (!state.user) return; e.preventDefault(); if ($('#finder').open) $('#finder-q').select(); else openFinder(); }
+});
+document.addEventListener('click', e => { const b = e.target.closest('[data-action="find"]'); if (b) openFinder(); });
 
 $('#landing-signin').addEventListener('click', signIn);
 $('#signout').addEventListener('click', () => signOut(auth));
