@@ -286,7 +286,7 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 @media (max-width: 760px) { .map-wrap.home-model svg { max-height: 240px; min-height: 160px; } .home-model .rlabel { display: none; } } /* on a phone the names would be a few pixels tall; the pads carry the story */
 .map-reset { position: absolute; top: 18px; left: 18px; z-index: 4; background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.3); backdrop-filter: blur(6px); }
 .map-reset:hover { background: rgba(255,255,255,.22); }
-.sheet-title { position: absolute; left: 22px; bottom: 18px; z-index: 3; pointer-events: none; font-family: var(--mono); border-left: 2px solid rgba(255,255,255,.45); padding-left: 12px; display: grid; gap: 2px; }
+.sheet-title { position: absolute; left: 22px; bottom: 18px; z-index: 3; pointer-events: none; font-family: var(--mono); border-left: 2px solid rgba(255,255,255,.45); padding-left: 12px; display: grid; gap: 2px; text-shadow: 0 1px 2px rgba(8,24,46,.9), 0 0 14px rgba(8,24,46,.85); }
 .sheet-title b { font: 700 17px var(--display); letter-spacing: .08em; text-transform: uppercase; color: #fff; }
 .sheet-title span { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--sheet-ink-3); }
 .ground { fill: var(--sheet); }
@@ -314,7 +314,13 @@ dialog::backdrop { background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px)
 .plabel { cursor: pointer; transition: opacity .18s; }
 /* room names appear only for the room under the pointer, the room the camera is framing, or a room search is pointing at */
 .map-wrap:not(.edit) .rlabel, .map-wrap:not(.edit) .plabel { opacity: 0; pointer-events: none; }
-.map-wrap:not(.edit) :is(.rlabel, .plabel):is(.show, .pin) { opacity: 1; pointer-events: auto; }
+/* in view mode the names live in the sheet title instead (see .sheet-room); edit mode keeps them on the floor */
+.sheet-title .sheet-room { font: inherit; color: #fff; letter-spacing: inherit; }
+.sheet-room:empty { display: none; }
+.sheet-room i { font-style: normal; margin: 0 10px; color: rgba(255,255,255,.45); }
+.sheet-room small { margin-left: 12px; font: 500 11px var(--mono); letter-spacing: .1em; color: var(--sheet-ink-3); vertical-align: middle; }
+.map-wrap:not(.edit) .room .floor { cursor: zoom-in; }
+
 .room-label { font: 600 19px var(--mono); fill: #fff; letter-spacing: .14em; paint-order: stroke; stroke: rgba(10,30,58,.7); stroke-width: 5px; stroke-linejoin: round; }
 .rlabel .rule { stroke: rgba(255,255,255,.4); stroke-width: 1.2; }
 .map-wrap.plan .room-label { font-size: 13px; letter-spacing: .1em; }
@@ -420,6 +426,7 @@ select.mini { font: 500 12px var(--body); padding: 4px 6px; border-radius: 8px; 
 .rows.keyed li { gap: 10px; }
 .rows.keyed .key { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--bg); font: 700 11.5px var(--mono); display: inline-grid; place-items: center; }
 .rows.keyed .key.dim { background: transparent; color: var(--ink-3); font-size: 14px; }
+.rows.keyed .key.icon { background: var(--surface-2); color: inherit; font: 400 14px var(--body); }
 .rows.keyed li.part { padding-left: 28px; }
 .map-panel { padding: 12px 16px; display: grid; gap: 12px; }
 .map-panel .hint { margin: 0; font-size: 12.5px; color: var(--ink-3); }

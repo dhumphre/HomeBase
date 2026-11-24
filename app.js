@@ -816,8 +816,8 @@ function map() {
   const markersSvg = placed.map(({ a, x, y, auto, n, shape }) => { const st = assetStatusDeep(a.id); const { w, d } = shape; const gs = Math.max(11, Math.min(26, Math.min(w, d) * 0.6)); return `<g class="marker ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}" transform="translate(${x},${y})">
       <rect class="foot" x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" rx="3"/>
       <text class="glyph" y="${gs * 0.36}" text-anchor="middle" font-size="${gs}">${assetIcon(a)}</text>
-      <g class="num"><circle cx="${w / 2}" cy="${-d / 2}" r="9"/><text x="${w / 2}" y="${-d / 2 + 3.5}" text-anchor="middle">${n}</text></g>
-      <text class="mlabel" y="${d / 2 + 14}" text-anchor="middle">${esc(shortName(a.name, 20).toUpperCase())}${st.parts.length ? ` +${st.parts.length}` : ''}</text>
+      ${st.parts.length ? `<g class="num"><circle cx="${w / 2}" cy="${-d / 2}" r="9"/><text x="${w / 2}" y="${-d / 2 + 3.5}" text-anchor="middle">${st.parts.length}</text></g>` : ''}
+      <text class="mlabel" y="${d / 2 + 14}" text-anchor="middle">${esc(shortName(a.name, 20).toUpperCase())}</text>
     </g>`; }).join('');
   const bg = m.bg[floor.id] ? `<image href="${m.bg[floor.id]}" x="0" y="0" width="${MAP_W}" height="${MAP_H}" preserveAspectRatio="xMidYMid meet" class="bgimg"/>` : '';
   const iso = !edit && mapState.view === 'iso';
@@ -852,9 +852,9 @@ function map() {
         <ul class="legend"><li><i class="over"></i>Overdue</li><li><i class="soon"></i>Due within 30 days</li><li><i class="todo"></i>Open to-do</li><li><i class="ok"></i>All good</li><li><i class="none"></i>Nothing scheduled</li></ul>
       </section>
       <section class="card"><header><h2>On ${esc(floor.name)}</h2><span class="more">${placed.length}</span></header>
-        ${statusRows.length ? `<ul class="rows keyed">${statusRows.map(({ a, n, st }) => `<li data-hl="${a.id}"><span class="key">${n}</span><a class="t" href="#/assets/${a.id}">${assetIcon(a)} ${esc(a.name)}<span class="sub">${esc((assetRoom(a) || {}).name || 'pinned')} · ${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>${st.parts.map(c => `<li class="part" data-hl="${a.id}"><span class="key dim">↳</span><a class="t" href="#/assets/${c.id}">${assetIcon(c)} ${esc(c.name)}<span class="sub">in ${esc(a.name)} · ${esc(assetStatus(c.id).label)}</span></a><i class="dot ${assetStatus(c.id).cls}"></i></li>`).join('')}`).join('')}</ul>` : `<div class="empty">Nothing on this floor yet. Give an asset a room (edit the asset, or Edit layout here) and it appears.</div>`}
+        ${statusRows.length ? `<ul class="rows keyed">${statusRows.map(({ a, n, st }) => `<li data-hl="${a.id}"><span class="key icon">${assetIcon(a)}</span><a class="t" href="#/assets/${a.id}">${esc(a.name)}<span class="sub">${esc((assetRoom(a) || {}).name || 'pinned')}${st.parts.length ? ` · ${st.parts.length} inside` : ''} · ${esc(st.label)}</span></a><i class="dot ${st.cls}"></i></li>${st.parts.map(c => `<li class="part" data-hl="${a.id}"><span class="key dim">↳</span><a class="t" href="#/assets/${c.id}">${assetIcon(c)} ${esc(c.name)}<span class="sub">in ${esc(a.name)} · ${esc(assetStatus(c.id).label)}</span></a><i class="dot ${assetStatus(c.id).cls}"></i></li>`).join('')}`).join('')}</ul>` : `<div class="empty">Nothing on this floor yet. Give an asset a room (edit the asset, or Edit layout here) and it appears.</div>`}
       </section>
-      <section class="card"><header><h2>Reading the drawing</h2></header><div class="map-panel"><p class="hint">Scroll or pinch to zoom, drag to pan. Hover a room to see its name; click the name, or double-click the floor, to zoom into it. Double-click empty ground to zoom out. Ctrl+K searches everything. Numbers on the plinths match the list. Hover a component for its status; click it for a card with what is inside it, and use Open page when you want to leave the map.</p></div></section>`;
+      <section class="card"><header><h2>Reading the drawing</h2></header><div class="map-panel"><p class="hint">Scroll or pinch to zoom, drag to pan. Hover a room to see its name in the corner; click its floor to zoom into it. Double-click empty ground to zoom out. Ctrl+K searches everything. A number on a component is how many parts are docked inside it. Hover a component for its status; click it for a card with what is inside it, and use Open page when you want to leave the map.</p></div></section>`;
 
   // the plan fits the rooms when just looking; editing shows the whole canvas so there is room to draw
   const pb = edit || !rooms.length ? [0, 0, MAP_W, MAP_H] : (() => { const x0 = Math.max(0, Math.min(...rooms.map(r => r.x)) - 40), y0 = Math.max(0, Math.min(...rooms.map(r => r.y)) - 40); return [x0, y0, Math.min(MAP_W, Math.max(...rooms.map(r => r.x + r.w)) + 40) - x0, Math.min(MAP_H, Math.max(...rooms.map(r => r.y + r.h)) + 40) - y0]; })();
@@ -874,7 +874,7 @@ function map() {
         <div class="map-card" id="map-card" hidden></div>
         <button type="button" class="btn small map-reset" data-action="map-reset" hidden>Whole floor</button>
         ${edit ? '' : `<button type="button" class="map-find" data-action="find"><span class="ico" aria-hidden="true">⌕</span>Find something<kbd>Ctrl K</kbd></button>`}
-        <div class="sheet-title"><b>${esc(floor.name)}</b><span>${new Set(rooms.map(roomKey)).size} rooms · ${placed.length} component${placed.length === 1 ? '' : 's'}${doors.length ? ` · ${doors.length} doors` : ''}</span><span>${edit ? 'Editing layout' : iso ? 'Isometric · 30°' : 'Plan'} · Home Base</span></div>
+        <div class="sheet-title"><b>${esc(floor.name)}<span class="sheet-room" id="sheet-room" aria-live="polite"></span></b><span>${new Set(rooms.map(roomKey)).size} rooms · ${placed.length} component${placed.length === 1 ? '' : 's'}${doors.length ? ` · ${doors.length} doors` : ''}</span><span>${edit ? 'Editing layout' : iso ? 'Isometric · 30°' : 'Plan'} · Home Base</span></div>
       </div>
       <aside class="map-side">${panel}</aside>
     </div>`;
@@ -948,7 +948,7 @@ function isoSvg(rooms, doors, placed, bgData, summary = new Map(), opts = {}) {
   for (const d of doors) { const { floor, leaf, depth } = isoDoor(d, wallAt(pieces, d)); flat.push(floor); if (leaf) ents.push({ d: depth, k: 0.5, html: leaf }); }
   // callouts: back to front, each takes the lowest height above its object whose label does not cover another label
   for (const p of opts.mini ? [] : placed.slice().sort((a, b) => a.x + a.y - b.x - b.y)) {
-    const w = (shortName(p.a.name, 20).length + (parts(p.a.id).length ? 3 : 0)) * 9.2 + 34;
+    const w = shortName(p.a.name, 20).length * 9.2 + 34;
     const top = p.shape.h + (p.shape.kind === 'console' && parts(p.a.id).some(c => assetShape(c).kind === 'tv') ? ft(3.2) : 0);
     p.up = claim([40, 68, 96, 124, 152, 180], up => { const T = isoP(p.x, p.y, p.z0 + top + up); return { x0: T.X - 10, x1: T.X - 10 + w, y0: T.Y - 12, y1: T.Y + 12 }; });
   }
@@ -1042,10 +1042,10 @@ function isoObject({ a, x, y, auto, n, shape, up = 40, z0 = 0 }) {
   if (kind === 'box' || kind === 'bin') { const size = Math.max(11, Math.min(30, Math.min(w, d) * 0.6)); const G = isoP(x, y, z0 + h); parts += `<text class="glyph" x="${f1(G.X)}" y="${f1(G.Y + size * 0.36)}" text-anchor="middle" font-size="${size}">${shape.icon}</text>`; }
   const pad = isoPts([isoP(x0 - 4, y0 - 4, z0), isoP(x1 + 4, y0 - 4, z0), isoP(x1 + 4, y1 + 4, z0), isoP(x0 - 4, y1 + 4, z0)]);
   const N = isoP(x1, y0, z0 + top); const Tp = isoP(x, y, z0 + top), T = isoP(x, y, z0 + top + up);
-  const name = shortName(a.name, 20).toUpperCase() + (st.parts.length ? ` +${st.parts.length}` : ''); const cw = name.length * 9.2 + 34;
+  const name = shortName(a.name, 20).toUpperCase(); const cw = name.length * 9.2 + 34;
   const body = `<g class="marker obj iso ${st.cls} ${auto ? 'auto' : ''}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
       <polygon class="pad" points="${pad}"/>${parts}
-      <g class="num"><circle cx="${f1(N.X + 9)}" cy="${f1(N.Y - 9)}" r="10"/><text x="${f1(N.X + 9)}" y="${f1(N.Y - 5)}" text-anchor="middle">${n || ''}</text></g>
+      ${st.parts.length ? `<g class="num" aria-label="${st.parts.length} inside"><circle cx="${f1(N.X + 9)}" cy="${f1(N.Y - 9)}" r="10"/><text x="${f1(N.X + 9)}" y="${f1(N.Y - 5)}" text-anchor="middle">${st.parts.length}</text></g>` : ''}
     </g>`;
   const callout = `<g class="callout ${st.cls}" data-asset="${a.id}" data-x="${x}" data-y="${y}">
       <line class="leader" x1="${f1(Tp.X)}" y1="${f1(Tp.Y)}" x2="${f1(T.X - 10)}" y2="${f1(T.Y)}"/>
@@ -1105,7 +1105,7 @@ function bindMap() {
     const mk = el.closest && el.closest('[data-asset]'); const a = mk && store.assets[mk.dataset.asset]; const r = a && assetRoom(hostOf(a) || a); return r ? roomKey(r) : null;
   };
   let shownRoom = null;
-  const showRoom = key => { if (key === shownRoom) return; shownRoom = key; svg.querySelectorAll('[data-focus].show').forEach(l => l.classList.remove('show')); if (key) svg.querySelectorAll(`[data-focus="${CSS.escape(key)}"]`).forEach(l => l.classList.add('show')); };
+  const showRoom = key => { if (key === shownRoom) return; shownRoom = key; mapState.hoverRoom = key; svg.querySelectorAll('[data-focus].show').forEach(l => l.classList.remove('show')); if (key) svg.querySelectorAll(`[data-focus="${CSS.escape(key)}"]`).forEach(l => l.classList.add('show')); roomHud(svg); };
   const card = $('#map-card');
   const light = id => { svg.querySelectorAll('.lit').forEach(m => m.classList.remove('lit')); if (id) svg.querySelectorAll(`[data-asset="${id}"]`).forEach(mk => mk.classList.add('lit')); };
   // select a component: open its card, light where it stands (its host, if it is docked), and optionally bring the camera to it
@@ -1206,15 +1206,16 @@ function bindMap() {
     const target = e.target === svg ? document.elementFromPoint(e.clientX, e.clientY) || e.target : e.target; // in case the pointer was captured
     const f = target.closest('[data-focus]'); if (f) { focusRoom(svg, wrap, f.dataset.focus); return; }
     if (e.pointerType === 'touch' || e.pointerType === 'pen') showRoom(roomUnder(target));
-    const g = target.closest('[data-asset]'); if (g) selectAsset(g.dataset.asset); else if (mapState.sel) closeCard();
+    const g = target.closest('[data-asset]'); if (g) { selectAsset(g.dataset.asset); return; }
+    if (mapState.sel) { closeCard(); return; }
+    const rm = target.closest('[data-room]'); const r = rm && room(rm.dataset.room); if (r && e.detail === 1) focusRoom(svg, wrap, roomKey(r));
   });
   document.addEventListener('keydown', function onKey(e) {
     if (!document.body.contains(svg)) { document.removeEventListener('keydown', onKey); return; }
     if (/input|textarea|select/i.test(e.target.tagName) || $('#editor').open || $('#picker').open || mapState.mode !== 'view') return;
     if (e.key === 'Escape' && mapState.sel) { closeCard(); return; }
     const placed = resolvePlaced(mapState.floor).filter(p => !p.lost);
-    if (/^[1-9]$/.test(e.key) && placed[Number(e.key) - 1]) { e.preventDefault(); selectAsset(placed[Number(e.key) - 1].a.id, true); }
-    else if ((e.key === '[' || e.key === ']') && placed.length) { e.preventDefault(); const cur = placed.findIndex(p => p.a.id === (store.assets[mapState.sel] ? (hostOf(store.assets[mapState.sel]) || store.assets[mapState.sel]).id : null)); const nx = cur < 0 ? (e.key === ']' ? 0 : placed.length - 1) : (cur + (e.key === ']' ? 1 : placed.length - 1)) % placed.length; selectAsset(placed[nx].a.id, true); }
+    if ((e.key === '[' || e.key === ']') && placed.length) { e.preventDefault(); const cur = placed.findIndex(p => p.a.id === (store.assets[mapState.sel] ? (hostOf(store.assets[mapState.sel]) || store.assets[mapState.sel]).id : null)); const nx = cur < 0 ? (e.key === ']' ? 0 : placed.length - 1) : (cur + (e.key === ']' ? 1 : placed.length - 1)) % placed.length; selectAsset(placed[nx].a.id, true); }
   });
   svg.addEventListener('dblclick', e => { if (mapState.mode !== 'view') return; const rm = e.target.closest('[data-room]'); const r = rm && mapData().rooms.find(x => x.id === rm.dataset.room); if (r) focusRoom(svg, wrap, roomKey(r)); else setCam(svg, wrap, null); });
   if (mapState.focus) { const k = mapState.focus; mapState.focus = null; focusRoom(svg, wrap, k, false); }
@@ -1240,7 +1241,7 @@ function setCam(svg, wrap, cam, animate = true) {
   wrap.classList.toggle('zoomed', !!cam && base.w / target.w >= 1.8);
   const box = svg.getBoundingClientRect(); const ppu = Math.min(box.width / target.w, box.height / target.h) || 1; // screen pixels per map unit
   wrap.style.setProperty('--lscale', Math.min(1, 1.1 / ppu).toFixed(3)); // labels keep a readable size on screen as the camera comes closer
-  wrap.querySelector('.map-reset').hidden = !cam;
+  wrap.querySelector('.map-reset').hidden = !cam; if (!cam) roomHud(svg);
   const apply = v => svg.setAttribute('viewBox', `${v.x.toFixed(1)} ${v.y.toFixed(1)} ${v.w.toFixed(1)} ${v.h.toFixed(1)}`);
   if (!animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(target); return; }
   const t0 = performance.now(); cancelAnimationFrame(mapState.anim);
@@ -1256,6 +1257,16 @@ function focusRoom(svg, wrap, key, animate = true) {
   if (w / h < base.w / base.h) w = h * base.w / base.h; else h = w * base.h / base.w;
   setCam(svg, wrap, { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h }, animate);
   if (mapState.cam) svg.querySelectorAll(`[data-focus="${CSS.escape(key)}"]`).forEach(l => l.classList.add('pin'));
+  roomHud(svg);
+}
+// The room under the pointer (or the one the camera frames) named in the corner of the sheet, with how many things are in it.
+function roomHud(svg) {
+  const el = document.getElementById('sheet-room'); if (!el) return;
+  const pin = svg.querySelector('[data-focus].pin'); const key = mapState.hoverRoom || (pin && pin.dataset.focus);
+  const r = key && mapData().rooms.find(x => x.floor === mapState.floor && roomKey(x) === key);
+  if (!r) { el.textContent = ''; el.closest('.sheet-title').classList.remove('has-room'); return; }
+  const n = list('assets').filter(a => placeOf(a).key === `${mapState.floor}|${key}`).length;
+  el.innerHTML = `<i>›</i>${esc(r.name)}${n ? `<small>${n} thing${n === 1 ? '' : 's'}</small>` : ''}`; el.closest('.sheet-title').classList.add('has-room');
 }
 function focusAsset(svg, wrap, id, animate = true) {
   const p = resolvePlaced(mapState.floor).find(p => p.a.id === id && !p.lost); if (!p) return;
