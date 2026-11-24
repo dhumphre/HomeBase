@@ -286,7 +286,7 @@ function home() {
     </div>
     <div class="grid">
       <section class="card"><header><h2>Due soon</h2><a class="more" href="#/schedule">all</a></header>
-        ${due.length ? `<ul class="rows">${due.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${esc(assetName(s.asset) || s.area || '')}</span></a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing due in the next month.</div>`}
+        ${due.length ? `<ul class="rows wrap">${due.map(s => { const [lbl, cls] = dueText(s); const where = assetName(s.asset) || s.area || ''; return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub"><span class="${cls}">${lbl}</span>${where ? ` · ${esc(where)}` : ''}</span></a>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing due in the next month.</div>`}
       </section>
       <section class="card"><header><h2>Open to-dos</h2><a class="more" href="#/todos">all</a></header>
         ${todos.length ? `<ul class="rows">${todos.map(todoRow).join('')}</ul>` : `<div class="empty">No open to-dos.</div>`}
@@ -397,7 +397,7 @@ function assetDetail(id) {
   const a = store.assets[id];
   if (!a) return head('Not found', { crumbs: `<a href="#/assets">Assets</a>` });
   const mine = withParts(id); const onPart = x => x.asset !== id && mine.has(x.asset); // rows that belong to something installed in this
-  const history = list('log').filter(l => mine.has(l.asset)).sort(by('date', -1));
+  const history = serviceOrder(list('log').filter(l => mine.has(l.asset)));
   const sched = (() => { const all = list('schedule').filter(s => mine.has(s.asset)).map(s => ({ s, i: dueInfo(s) })); const dated = all.filter(x => x.i.eff != null).sort((p, q) => p.i.eff - q.i.eff); return [...dated, ...all.filter(x => x.i.eff == null)].map(x => x.s); })();
   const open = list('todos').filter(t => mine.has(t.asset) && t.status !== 'done');
   const spent = history.reduce((s, l) => s + (Number(l.cost) || 0), 0);
@@ -651,6 +651,21 @@ function dueInfo(s) {
   return i;
 }
 // The short due label for a task and its colour class, like dueLabel but aware of mileage.
+// Service history, newest first. Entries with an odometer reading sort by it, since many old entries have miles but no date.
+// An entry with only a date gets the mileage of the dated entries around it (clamped at the ends), so it lands in place;
+// with no entries carrying both, or for entries with neither, it falls back to date order. Ties go to the later date.
+function serviceOrder(logs) {
+  const mi = l => { const n = Number(l.mileage); return l.mileage !== '' && l.mileage != null && Number.isFinite(n) ? n : null; };
+  const pairs = logs.filter(l => l.date && mi(l) != null).map(l => [l.date, mi(l)]).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  const atDate = d => { if (!pairs.length) return null; let best = pairs[0][1]; for (const [pd, m] of pairs) { if (pd <= d) best = Math.max(best, m); } return best; };
+  const key = l => mi(l) ?? (l.date ? atDate(l.date) : null);
+  return logs.map(l => ({ l, k: key(l) })).sort((a, b) => {
+    if (a.k != null && b.k != null && a.k !== b.k) return b.k - a.k;
+    if ((a.k == null) !== (b.k == null)) return a.k == null ? 1 : -1;
+    return (b.l.date || '').localeCompare(a.l.date || '');
+  }).map(x => x.l);
+}
+
 function dueText(s) {
   const i = dueInfo(s);
   if (i.basis === 'miles') { const cls = i.eff < 0 ? 'm over' : i.eff <= 30 ? 'm due' : 'm'; const est = i.milesLeft < 0 ? '' : i.estDays <= 0 ? ' · about now' : i.estDays <= 60 ? ` · ~${fmtDate(addDays(today(), i.estDays))}` : ''; return [i.milesLeft < 0 ? `${miles(-i.milesLeft)} mi over` : `in ${miles(i.milesLeft)} mi${est}`, cls]; }
