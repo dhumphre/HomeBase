@@ -245,6 +245,7 @@ function render() {
   $('#main').innerHTML = fn(id); $('#main').classList.toggle('wide', view === 'map');
   if (draft && state.editing.page === draft.id) { const ta = $('#page-editor'); if (ta) { ta.value = draft.value; if (draft.focused) { ta.focus(); ta.setSelectionRange(draft.s, draft.e); } } }
   if (view === 'map') bindMap();
+  const svc = $('[data-svc-filter]'); if (svc && svc.value) applySvcFilter(svc); // a live update keeps the history filtered
   document.title = `${view === 'home' ? 'Home Base' : (SCHEMA[view] ? SCHEMA[view].many : view[0].toUpperCase() + view.slice(1)) + ' · Home Base'}`;
 }
 
@@ -409,11 +410,12 @@ function assetDetail(id) {
       <div>
         ${isCar(a) ? carDash(a) : ''}
         ${a.notes ? `<div class="page-body prose">${md(a.notes)}</div>` : ''}
-        <div class="section"><h2>Service history <span class="more" style="font-family:var(--mono);font-size:12px;color:var(--ink-3)">${history.length}</span></h2>
-          <div class="card">${history.length ? `<ul class="rows">${history.map(l => `<li><a class="t" href="#/log/${l.id}">${esc(l.item)}<span class="sub">${[onPart(l) ? assetName(l.asset) : '', l.doneBy || '', l.mileage ? `${miles(l.mileage)} mi` : ''].filter(Boolean).map(esc).join(' · ')}</span></a><span class="m">${money(l.cost)}</span><span class="m">${fmtDate(l.date)}</span></li>`).join('')}</ul>` : `<div class="empty">No work logged for this yet.</div>`}</div></div>
         <div class="section"><h2>${isCar(a) ? 'Service intervals' : 'Schedule'}</h2>
           <div class="card">${sched.length ? `<ul class="rows">${sched.map(s => { const [lbl, cls] = dueText(s); return `<li><a class="t" href="#/schedule/${s.id}">${esc(s.task)}<span class="sub">${onPart(s) ? `${esc(assetName(s.asset))} · ` : ''}${esc(intervalText(s))}${s.lastDone ? ` · last ${fmtDate(s.lastDone)}` : ''}${s.lastMiles != null && s.lastMiles !== '' ? ` at ${miles(s.lastMiles)} mi` : ''}</span>${intervalBar(s)}</a><span class="${cls}">${lbl}</span>${doneBtn(s)}</li>`; }).join('')}</ul>` : `<div class="empty">Nothing scheduled for this.</div>`}</div></div>
         ${open.length ? `<div class="section"><h2>Open to-dos</h2><div class="card"><ul class="rows">${open.map(todoRow).join('')}</ul></div></div>` : ''}
+        <details class="section svc" ${svcOpen() ? 'open' : ''}><summary><h2>Service history <span class="more" id="svc-count">${history.length}</span></h2></summary>
+          ${isCar(a) && history.length > 1 ? `<input type="search" class="svc-search" data-svc-filter="${id}" placeholder="Search: oil, tires, 2024, >90k" value="${esc((state.filters.svc || {})[id] || '')}" aria-label="Search service history">` : ''}
+          <div class="card">${history.length ? `<ul class="rows" id="svc-rows">${history.map(l => `<li data-q="${esc(svcText(l))}" data-cost="${Number(l.cost) || 0}" data-mi="${esc(l.mileage ?? '')}"><a class="t" href="#/log/${l.id}">${esc(l.item)}<span class="sub">${[onPart(l) ? assetName(l.asset) : '', l.doneBy || '', l.mileage ? `${miles(l.mileage)} mi` : ''].filter(Boolean).map(esc).join(' · ')}</span></a><span class="m">${money(l.cost)}</span><span class="m">${fmtDate(l.date)}</span></li>`).join('')}</ul><div class="empty" id="svc-none" hidden>No service matches that.</div>` : `<div class="empty">No work logged for this yet.</div>`}</div></details>
       </div>
       <aside class="card"><dl class="props">${props.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></aside>
     </div>`;
@@ -650,6 +652,34 @@ function dueInfo(s) {
   }
   return i;
 }
+// Whether the service history is unfolded: remembered per browser, open until it is first folded away.
+const svcOpen = () => { try { return localStorage.getItem('hb.svcOpen') !== '0'; } catch { return true; } };
+document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.svc')) try { localStorage.setItem('hb.svcOpen', e.target.open ? '1' : '0'); } catch {} }, true);
+// Everything a service entry can be found by: what was done, notes, who did it, the part it was on, the mileage (with and without
+// commas), the date (as stored, spelled out, and so the year) and the cost.
+function svcText(l) {
+  const d = parseDate(l.date); const n = Number(l.mileage); const hasMi = l.mileage !== '' && l.mileage != null && Number.isFinite(n);
+  return fnorm([l.item, l.notes, l.doneBy, assetName(l.asset), hasMi ? `${n} ${miles(n)} mi` : '', l.date, d ? d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }) : '', l.cost ? `$${l.cost}` : ''].filter(Boolean).join(' '));
+}
+// Filter a car's service history in place as the box is typed in. Every word must appear somewhere in an entry; ">90k" or "<60000"
+// keeps entries at or above (below) that mileage. The count beside the heading shows the matches and what they cost.
+function applySvcFilter(input) {
+  const ul = $('#svc-rows'); if (!ul) return;
+  const q = fnorm(input.value).trim(); (state.filters.svc ||= {})[input.dataset.svcFilter] = input.value;
+  const num = t => { const m = /^(\d+(?:\.\d+)?)(k)?$/.exec(t.replace(/,/g, '')); return m ? Number(m[1]) * (m[2] ? 1000 : 1) : null; };
+  const tests = q.split(/\s+/).filter(Boolean).map(t => {
+    const cmp = /^([<>])(.+)$/.exec(t);
+    if (cmp && num(cmp[2]) != null) { const v = num(cmp[2]); return (txt, li) => { const m = Number(li.dataset.mi); return li.dataset.mi !== '' && Number.isFinite(m) && (cmp[1] === '>' ? m >= v : m <= v); }; }
+    const k = /^\d+k$/.test(t) ? String(num(t)).slice(0, -3) : null; // "98k" finds 98,xxx miles
+    return txt => txt.includes(t) || txt.includes(stem(t)) || (k != null && new RegExp(`(^|\\D)${k}\\d{3}(\\D|$)`).test(txt));
+  });
+  let n = 0, cost = 0;
+  for (const li of ul.children) { const show = tests.every(f => f(li.dataset.q, li)); li.hidden = !show; if (show) { n++; cost += Number(li.dataset.cost) || 0; } }
+  $('#svc-count').textContent = q ? `${n} of ${ul.children.length}${cost ? ` · ${money(cost)}` : ''}` : String(ul.children.length);
+  $('#svc-none').hidden = n > 0;
+}
+document.addEventListener('input', e => { if (e.target.matches && e.target.matches('[data-svc-filter]')) applySvcFilter(e.target); });
+
 // The short due label for a task and its colour class, like dueLabel but aware of mileage.
 // Service history, newest first. Entries with an odometer reading sort by it, since many old entries have miles but no date.
 // An entry with only a date gets the mileage of the dated entries around it (clamped at the ends), so it lands in place;
