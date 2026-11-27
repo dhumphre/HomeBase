@@ -54,3 +54,9 @@ then `/mcp` inside Claude Code to authenticate.
 ## Who may sign in
 
 Anyone whose email has an `access/{email}` document. Add or remove people with the `household` tool, or locally with `node tools/hb.mjs share <email>` / `unshare <email>`. Everyone else sees "Not on the household list".
+
+### A separate logbook for another house
+
+`household` with `invite: <email>` (or `node tools/hb.mjs invite <email>`) writes `access/{email}` as `{ invite: true, invitedBy }` with no owner. The first time that person signs in to the site, it claims the invite: the rules let it set `owner` to its own uid and drop `invite`, and nothing else, so it gets an empty logbook under its own `users/{uid}` and can never point itself at anyone else's. After that they can connect Claude with the same connector URL and `share` their own household members. Only the original household (the first owner on the list) can invite from the connector. Each household's `household` tool lists and removes only its own entries.
+
+The local tools default to the first owner on the list; set `HB_EMAIL=<their email>` to run `hb.mjs` against an invited household's logbook.

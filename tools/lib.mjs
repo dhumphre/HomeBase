@@ -31,7 +31,8 @@ const clean = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== 
 const isoDate = s => { if (s && !/^\d{4}-\d{2}-\d{2}$/.test(String(s))) throw new Error(`Date must be YYYY-MM-DD, not "${s}".`); return s || today(); };
 
 let db, UID, ready;
-// The data belongs to the household owner: HB_UID, or HB_EMAIL, or the owner named by the access list, or the only user in the project.
+// The data belongs to the household owner: HB_UID, or HB_EMAIL, or the first owner on the access list (the original household;
+// invited logbooks come later), or the only user in the project. Set HB_EMAIL to work on an invited household's logbook.
 export function init() { return ready || (ready = connect()); }
 async function connect() {
   if (!existsSync(keyPath)) throw new Error(`No service-account key at ${keyPath}. Firebase console > Project settings > Service accounts > Generate new private key, save it there.`);
@@ -40,11 +41,13 @@ async function connect() {
   if (process.env.HB_UID) UID = process.env.HB_UID;
   else if (process.env.HB_EMAIL) UID = (await getAuth().getUserByEmail(process.env.HB_EMAIL)).uid;
   else {
-    const { users } = await getAuth().listUsers(10);
-    const owners = (await db.collection('access').get()).docs.map(d => d.data().owner);
-    const owner = users.find(u => owners.includes(u.uid)) || (users.length === 1 ? users[0] : null);
-    if (!owner) throw new Error(`Several users and no access list; set HB_EMAIL. Users: ${users.map(u => `${u.email} ${u.uid}`).join(', ')}`);
-    UID = owner.uid;
+    const first = (await db.collection('access').get()).docs.map(d => d.data()).filter(a => a.owner).sort((a, b) => (a.added || 0) - (b.added || 0))[0];
+    if (first) UID = first.owner;
+    else {
+      const { users } = await getAuth().listUsers(10);
+      if (users.length !== 1) throw new Error(`Several users and no access list; set HB_EMAIL. Users: ${users.map(u => `${u.email} ${u.uid}`).join(', ')}`);
+      UID = users[0].uid;
+    }
   }
   return { db, UID };
 }
@@ -240,6 +243,12 @@ export async function mapSummary() {
 export async function dump() { const out = {}; for (const c of COLLS) out[c] = await all(c); out.map = await layout(); return out; }
 
 // Household access list: access/{email} -> { owner } lets that Google account open the owner's data (the rules check it).
-export async function share(email) { await init(); const e = String(email).trim().toLowerCase(); await db.collection('access').doc(e).set({ owner: UID, email: e, added: Date.now() }); return e; }
-export async function unshare(email) { await init(); const e = String(email).trim().toLowerCase(); await db.collection('access').doc(e).delete(); return e; }
-export async function shares() { await init(); return (await db.collection('access').get()).docs.map(d => d.data()); }
+// An invite, access/{email} -> { invite: true, invitedBy }, gives that account a separate, empty logbook of its own:
+// it claims the invite (owner = its own uid) the first time it signs in to the site.
+const accessDoc = e => db.collection('access').doc(String(e).trim().toLowerCase());
+async function takenBy(e) { const d = await accessDoc(e).get(); if (d.exists && d.data().owner !== UID && d.data().invitedBy !== UID) throw new Error(`${e} is on another household's list; that household has to remove it.`); return d; }
+export async function share(email) { await init(); const e = String(email).trim().toLowerCase(); await takenBy(e); await accessDoc(e).set({ owner: UID, email: e, added: Date.now() }); return e; }
+export async function invite(email) { await init(); const e = String(email).trim().toLowerCase(); const d = await takenBy(e); if (d.exists) throw new Error(`${e} is already on this household's list; remove it first to give it a logbook of its own.`); await accessDoc(e).set({ invite: true, invitedBy: UID, email: e, added: Date.now() }); return e; }
+export async function unshare(email) { await init(); const e = String(email).trim().toLowerCase(); const d = await takenBy(e); if (d.exists && d.data().owner && d.data().owner !== UID) throw new Error(`${e} has claimed its own logbook; remove it with HB_EMAIL set to that account.`); await accessDoc(e).delete(); return e; }
+// This household's members and its pending invites (other households' entries are theirs).
+export async function shares() { await init(); return (await db.collection('access').get()).docs.map(d => d.data()).filter(a => a.owner === UID || (!a.owner && a.invitedBy === UID)); }

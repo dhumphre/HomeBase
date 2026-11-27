@@ -28,6 +28,7 @@
 //   node tools/hb.mjs rmdoor <id>                    remove a door
 //   node tools/hb.mjs map                            floors, rooms, doors and placed components
 //   node tools/hb.mjs share <email> | unshare <email> | shares     the household access list
+//   node tools/hb.mjs invite <email>                 a separate, empty logbook for that Google account (claimed when it first signs in)
 //   node tools/hb.mjs dump                           everything as JSON
 import { readFileSync } from 'node:fs';
 import * as hb from './lib.mjs';
@@ -76,8 +77,9 @@ try {
     case 'turn': { const r = await hb.turn(rest[0], rest[1]); console.log(`${r.asset} now faces ${r.facing}`); break; }
     case 'map': { const m = await hb.mapSummary(); for (const f of m.floors) { console.log(`${f.name} (${f.id})`); f.rooms.forEach(r => console.log(`  room ${r.name}  x${r.x} y${r.y} w${r.w} h${r.h}  color ${r.color}  ${r.id}`)); f.doors.forEach(d => console.log(`  door ${d.dir} at ${d.x},${d.y} w${d.w}  ${d.id}`)); f.assets.forEach(a => console.log(`  asset ${a.name} in ${a.room || '?'}${a.pinned ? ` (pinned ${a.pinned})` : ''}${a.parts && a.parts.length ? ` [contains ${a.parts.join(', ')}]` : ''}  ${a.id}`)); } console.log(`Unplaced: ${m.unplaced.join(', ') || 'none'}`); break; }
     case 'share': console.log(`Added ${await hb.share(rest[0])} to the household list`); break;
+    case 'invite': console.log(`Invited ${await hb.invite(rest[0])} to a logbook of its own; it is set up the first time they sign in at https://dhumphre.github.io/HomeBase/`); break;
     case 'unshare': console.log(`Removed ${await hb.unshare(rest[0])} from the household list`); break;
-    case 'shares': (await hb.shares()).forEach(s => console.log(`  ${s.email}  owner ${s.owner}`)); break;
+    case 'shares': (await hb.shares()).forEach(s => console.log(`  ${s.email}  ${s.owner ? `owner ${s.owner}` : 'invited, not signed in yet'}`)); break;
     case 'dump': show(await hb.dump()); break;
     default: { const src = readFileSync(new URL(import.meta.url), 'utf8').split(/\r?\n/); const usage = []; for (const l of src.slice(src[0].startsWith('#!') ? 1 : 0)) { if (!l.startsWith('//')) break; usage.push(l.slice(3)); } console.log(usage.join('\n')); } // the comment block at the top only, so comments inside the code stay out of the usage text
   }

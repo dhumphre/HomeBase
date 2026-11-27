@@ -36,6 +36,7 @@ ${d.redirectIsLoopback ? '<p class="warn">This sends access to an app on this co
 export const notHouseholdPage = (email: string) => page('Not on the household list', `
 <h1>Not on the household list</h1>
 <p><strong>${escape(email)}</strong> cannot open the Home Base logbook.</p>
-<p>Sign in with the Google account the household uses, or ask a member to add this one.</p>`);
+<p>Sign in with the Google account the household uses, or ask a member to add this one.</p>
+<p>Invited to a logbook of your own? Sign in once at <a href="https://dhumphre.github.io/HomeBase/">Home Base</a> to set it up, then connect again.</p>`);
 
 export const errorPage = (message: string, status = 400) => new Response(page('Something went wrong', `<h1>Something went wrong</h1><p>${escape(message)}</p><p>Go back to the app and start connecting again.</p>`), { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });

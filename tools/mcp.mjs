@@ -32,6 +32,6 @@ tool('remove_door', 'Remove a door from the house map by its id (see map).', { i
 tool('dock', 'Install one asset inside another (a surge protector in the electrical panel, a filter in the furnace): it rides with its host on the map and its status rolls up. Omit parent to undock.', { asset: z.string(), parent: z.string().optional() }, a => hb.dock(a.asset, a.parent || null));
 tool('turn', 'Rotate an asset already on the map so its front faces n (back of the map), s (toward the viewer), e or w.', { asset: z.string(), facing: z.enum(['n', 's', 'e', 'w']) }, a => hb.turn(a.asset, a.facing));
 tool('map', 'Floors, rooms, doors and placed assets of the house map.', {}, () => hb.mapSummary());
-tool('household', 'Who can open the logbook (Google accounts on the access list); add or remove an email.', { add: z.string().optional(), remove: z.string().optional() }, async a => { if (a.add) await hb.share(a.add); if (a.remove) await hb.unshare(a.remove); return hb.shares(); });
+tool('household', 'Who can open this logbook (Google accounts on the access list); add or remove an email. invite gives a Google account a separate, empty logbook of its own (for someone managing a different house), set up the first time they sign in to the site.', { add: z.string().optional(), remove: z.string().optional(), invite: z.string().optional() }, async a => { if (a.add) await hb.share(a.add); if (a.invite) await hb.invite(a.invite); if (a.remove) await hb.unshare(a.remove); return hb.shares(); });
 
 await server.connect(new StdioServerTransport());
