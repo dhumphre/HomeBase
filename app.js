@@ -3,7 +3,7 @@
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js';
-import { initializeFirestore, getFirestore, persistentLocalCache, collection, doc, getDoc, setDoc, deleteDoc, onSnapshot, writeBatch } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js';
+import { initializeFirestore, getFirestore, persistentLocalCache, collection, doc, getDoc, setDoc, updateDoc, deleteField, deleteDoc, onSnapshot, writeBatch } from 'https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyAw57oCNI8tpI6Lqs7KdoyvI_MGPZDFnYY",
@@ -191,14 +191,26 @@ onAuthStateChanged(auth, async user => {
   if (user) {
     // Only accounts on the household list get in; the list is kept outside the app.
     let owner = null;
-    try { const snap = await getDoc(doc(db, 'access', String(user.email || '').toLowerCase())); if (snap.exists()) owner = snap.data().owner; }
+    try {
+      const ref = doc(db, 'access', String(user.email || '').toLowerCase());
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const a = snap.data();
+        // An invite to a separate logbook: claim it on first sign-in, so this account owns its own, empty one.
+        if (a.invite && !a.owner) {
+          try { await updateDoc(ref, { owner: user.uid, invite: deleteField() }); owner = user.uid; }
+          catch (e) { await signOut(auth); const msg = $('#landing-msg'); msg.textContent = `Couldn't set up your logbook (${e && e.code || e && e.message || 'offline'}). Try again in a moment.`; msg.hidden = false; return; }
+        }
+        else owner = a.owner;
+      }
+    }
     catch (e) {
       if (e && e.code === 'permission-denied') owner = user.uid; // rules without an access list yet: fall back to this account's own data
       else { await signOut(auth); const msg = $('#landing-msg'); msg.textContent = `Couldn't check the household list (${e && e.code || e && e.message || 'offline'}). Try again in a moment.`; msg.hidden = false; return; }
     }
     if (!owner) {
       await signOut(auth);
-      const msg = $('#landing-msg'); msg.textContent = `${user.email || 'That account'} isn't on the household list, so there is nothing to show. Ask the owner to add it.`; msg.hidden = false;
+      const msg = $('#landing-msg'); msg.textContent = `${user.email || 'That account'} isn't on the household list, so there is nothing to show. Ask the owner to add it to theirs, or to invite it to a logbook of its own.`; msg.hidden = false;
       return;
     }
     state.owner = owner; $('#who').textContent = user.displayName || user.email || ''; subscribeAll();
@@ -277,7 +289,7 @@ function home() {
   const empty = COLLS.every(c => !list(c).length);
   return `
     ${head('Home Base', { eyebrow: new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), actions: btn('+ Log work', 'new', 'data-coll="log"', 'btn primary small') + btn('+ To-do', 'new', 'data-coll="todos"') })}
-    ${empty && state.ready ? `<div class="callout"><p><b>Fresh start.</b> Add starter content to get a typical house schedule, your three current projects and a how-to page, or begin from a blank slate.</p>${btn('Add starter content', 'seed', '', 'btn primary small')}</div>` : ''}
+    ${empty && state.ready ? `<div class="callout"><p><b>Fresh start.</b> Add starter content to get a typical house schedule and a how-to page, or begin from a blank slate.</p>${btn('Add starter content', 'seed', '', 'btn primary small')}</div>` : ''}
     ${homeModel()}
     <div class="tiles">
       <div class="tile ${overdue ? 'warn' : ''}"><div class="n">${overdue}</div><div class="l">overdue</div></div>
@@ -391,7 +403,7 @@ function assets(id) {
   return `
     ${head('Assets', { eyebrow: 'things you maintain', actions: btn('+ Asset', 'new', 'data-coll="assets"', 'btn primary small') })}
     ${rows.length ? `<div class="grid">${Object.entries(groups).map(([area, items]) => `<section class="card"><header><h2>${esc(area)}</h2><span class="more">${items.length}</span></header><ul class="rows">${items.map(a => { const lf = lifespan(a); return `<li><a class="t" href="#/assets/${a.id}">${esc(a.name)}<span class="sub">${esc([a.type, a.make].filter(Boolean).join(' · '))}</span></a>${lf && lf.pct >= .8 ? `<span class="m ${lf.pct >= 1 ? 'due' : ''}">${lf.pct >= 1 ? 'past typical life' : `${lf.age.years} of ~${lf.years} yrs`}</span>` : ''}<span class="m">${esc(a.year || '')}</span></li>`; }).join('')}</ul></section>`).join('')}</div>`
-    : `<div class="card"><div class="empty">No assets yet. Start with the furnace, the water heater and each car. Put the filter size or oil spec in Specs and it's one tap away at the store.<div class="row" style="margin-top:10px">${btn('Add my cars', 'seed-cars', '', 'btn primary small')}</div></div></div>`}`;
+    : `<div class="card"><div class="empty">No assets yet. Start with the furnace, the water heater and each car. Put the filter size or oil spec in Specs and it's one tap away at the store.</div></div>`}`;
 }
 
 function assetDetail(id) {
@@ -548,7 +560,7 @@ function settings() {
         <p style="margin:0;color:var(--ink-2);font-size:14px">Everything syncs to your account. Export a JSON copy now and then anyway: every list and the map layout, and it restores with Import.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">${btn('Export JSON', 'export')}<label class="btn small" tabindex="0">Import JSON<input type="file" accept="application/json" data-action="import" hidden></label></div></div></section>
       <section class="card"><header><h2>What's stored</h2></header><ul class="rows">${counts}</ul></section>
-      <section class="card"><header><h2>Starter content</h2></header><div style="padding:14px 16px;display:grid;gap:10px"><p style="margin:0;color:var(--ink-2);font-size:14px">Adds a typical house schedule, a how-to page and your current projects. Skips anything with the same name that already exists.</p><div class="row">${btn('Add starter content', 'seed')}${btn('Add my cars', 'seed-cars')}</div></div></section>
+      <section class="card"><header><h2>Starter content</h2></header><div style="padding:14px 16px;display:grid;gap:10px"><p style="margin:0;color:var(--ink-2);font-size:14px">Adds a typical house schedule and a how-to page. Skips anything with the same name that already exists.</p><div class="row">${btn('Add starter content', 'seed')}</div></div></section>
       <section class="card"><header><h2>Account</h2></header><div style="padding:14px 16px;font-size:14px;color:var(--ink-2)">Signed in as ${esc(state.user.email || state.user.displayName || '')}. One shared household logbook, readable only by the accounts on its access list.</div></section>
     </div>`;
 }
@@ -1566,35 +1578,10 @@ async function seed() {
     ['Replace engine and cabin air filters', 'Car', 12, 'months', null, 'Record both part numbers on the car asset.', 12000]
   ];
   for (const [task, area, every, unit, nextDue, notes, everyMiles] of sched) if (!have('schedule', 'task', task)) put('schedule', { task, area, every, unit, nextDue, notes, asset: null, lastDone: null, season: null, everyMiles: everyMiles || null, lastMiles: null });
-  const projects = [
-    { name: 'Trailhead Almanac', status: 'live', started: '2026-11-21', liveUrl: 'https://dhumphre.github.io/WeatherTrack/', repo: 'https://github.com/dhumphre/WeatherTrack', services: 'GitHub Pages, Firebase, Claude Code, Open-Meteo, NWS', tags: 'web, hiking', summary: 'Hikeable-weather ledger for nearby places, one to three days out.', body: '## What it does\n\n- Pulls National Weather Service forecasts (no key) for each saved place and scores the next three days for hikeability.\n- Air quality from Open-Meteo shows per day and per hour; NWS Air Quality Alerts show as a badge.\n- Google sign-in syncs the place list across devices through Firebase.\n\n## How it is built\n\n- Single file, `index.html`, no build step. Hosted on GitHub Pages from the main branch.\n- Firebase project **trailhead-almanac**: Google sign-in, Firestore document `users/{uid}` with the places array, owner-only rules.\n- The web API key in the page is public by design. GitHub\'s secret scanner flags it as a false positive.\n\n## Updating\n\n```\ngit add index.html; git commit -m "Describe the change"; git push\n```\n\nScore weights live in `summarizeDay` in index.html.' },
-    { name: 'Home Base', status: 'live', started: '2026-11-21', liveUrl: 'https://dhumphre.github.io/HomeBase/', repo: 'https://github.com/dhumphre/HomeBase', services: 'GitHub Pages, Firebase, Claude Code', tags: 'web, home', summary: 'This site: the logbook for the house, the cars and the projects.', body: '## How it is built\n\n- Three files: `index.html`, `styles.css`, `app.js`. No build step. Hosted on GitHub Pages.\n- Shares the **trailhead-almanac** Firebase project. Data lives in Firestore under `users/{uid}/{collection}/{id}` for assets, log, schedule, todos, projects and pages, with owner-only rules.\n- Markdown rendered with marked and sanitized with DOMPurify. `[[Page title]]` links between wiki pages.\n\n## Updating\n\n```\ngit add .; git commit -m "Describe the change"; git push\n```' },
-    { name: 'Goat Rocks Field Notes', status: 'live', liveUrl: 'https://goat-rocks-field-notes.thetrunkmonkey.chatgpt.site/', services: 'ChatGPT', tags: 'web, hiking', summary: 'Trip log and shared photo roll for a three-day Goat Rocks Wilderness backpack.', body: '- Berry Patch to Walupt Lake via Goat Lake, Snowgrass Flats, Old Snowy, Cispus Pass and Nannie Peak. Five backpackers, three days, about 22.6 miles and 5,400 ft of climbing.\n- Route map with per-day legs, camera and phone galleries, and a shared roll trip members add to with a private trip code.' },
-    { name: 'Removertise', status: 'live', liveUrl: 'https://removertise-control.dhumphre.workers.dev/', services: 'Cloudflare Workers, Cloudflare Access', tags: 'web', summary: 'Removertise remote control panel on Cloudflare Workers, behind a Cloudflare Access login.', body: '- Served from a Cloudflare Worker on dhumphre.workers.dev, with Cloudflare Access (team yellow-glade-0073) in front.\n- Add what it does, where the code lives, and how it deploys.' }
-  ];
-  for (const p of projects) if (!have('projects', 'name', p.name)) put('projects', p);
   if (!have('pages', 'title', 'Start here')) put('pages', { title: 'Start here', area: '', body: '# Start here\n\nThis is your logbook. A few habits make it earn its keep:\n\n- **Log work the day it happens.** From Home, hit *Log work*. Link it to the asset so the asset page builds its own history.\n- **Put part numbers on assets.** Filter sizes, oil spec, tire size, the plumber\'s number. Open the asset at the store.\n- **Let Schedule do the remembering.** When something is due, press *Done* and it logs the work and rolls the date forward.\n- **Write pages for the rest.** Where the water shutoff is, how the sprinkler controller works, what the mechanic said. Link pages with double brackets, like [[House overview]].\n\nAsk Claude to log, look up or summarize any of this.' });
   if (!have('pages', 'title', 'House overview')) put('pages', { title: 'House overview', area: 'House', body: '# House overview\n\n## Shutoffs\n\n- Water main: \n- Gas: \n- Electrical panel: \n\n## People to call\n\n| Who | For | Number |\n| --- | --- | --- |\n|  |  |  |\n\n## Quirks\n\n- ' });
   if (!n) { toast('Starter content is already here'); return; }
   try { await batch.commit(); toast(`Added ${n} starter items`); } catch (e) { toast(`Couldn't add starter content (${e.code || e.message})`, true); }
-}
-
-// The two cars, each with a Subaru-style service schedule linked to it. Parked in the garage if the map has one.
-async function seedCars() {
-  const cars = [
-    { name: '2020 Subaru Legacy', year: 2020, make: 'Subaru Legacy', type: 'Sedan', specs: 'Oil: 0W-20 synthetic. Tires: 225/65R17 (check the door jamb). Add VIN, plate and last service mileage.' },
-    { name: '2017 Subaru Crosstrek', year: 2017, make: 'Subaru Crosstrek', type: 'Crossover', specs: 'Oil: 0W-20 synthetic. Tires: 225/55R17 (check the door jamb). Add VIN, plate and last service mileage.' }];
-  const service = [['Oil and filter change', 6, 'months', 6000], ['Rotate tires', 6, 'months', 6000], ['Replace engine and cabin air filters', 12, 'months', 12000], ['Replace wiper blades', 12, 'months', null], ['Brake fluid exchange', 30, 'months', 30000], ['Registration renewal', 12, 'months', null]];
-  const existing = list('assets'); const garage = mapData().rooms.find(r => roomKey(r) === 'garage');
-  const batch = writeBatch(db); let n = 0; const now = Date.now();
-  cars.forEach((c, i) => {
-    if (existing.some(a => a.name.toLowerCase() === c.name.toLowerCase())) return;
-    const id = uid(); const map = garage ? { floor: garage.floor, x: garage.x + Math.round(garage.w * (i ? 0.7 : 0.3) / SNAP) * SNAP, y: garage.y + Math.round(garage.h * 0.55 / SNAP) * SNAP } : null;
-    batch.set(userDoc('assets', id), { ...c, id, area: 'Car', serial: null, purchased: null, contact: null, manual: null, notes: '', map, created: now, updated: now }); n++;
-    for (const [task, every, unit, everyMiles] of service) { const sid = uid(); batch.set(userDoc('schedule', sid), { id: sid, task, area: 'Car', asset: id, every, unit, everyMiles, lastMiles: null, nextDue: null, lastDone: null, season: null, notes: 'Set the odometer on the car, press Set last done with the mileage from the last service, and the task is tracked by months and miles.', created: now, updated: now }); n++; }
-  });
-  if (!n) { toast('Both cars are already here'); return; }
-  try { await batch.commit(); toast(`Added both cars and ${n - 2} service items`); } catch (e) { toast(`Couldn't add the cars (${e.code || e.message})`, true); }
 }
 
 document.addEventListener('click', async e => {
@@ -1615,7 +1602,6 @@ document.addEventListener('click', async e => {
   else if (a === 'cancel-page') { state.editing.page = null; render(); }
   else if (a === 'save-page') { const p = store.pages[el.dataset.id]; state.editing.page = null; await save('pages', { ...p, body: $('#page-editor').value }); toast('Page saved'); }
   else if (a === 'seed') seed();
-  else if (a === 'seed-cars') seedCars();
   else if (a === 'export') exportJSON();
   else if (a === 'theme') { const v = el.dataset.value; try { if (v === 'system') { delete document.documentElement.dataset.theme; localStorage.removeItem('hb.theme'); } else { document.documentElement.dataset.theme = v; localStorage.setItem('hb.theme', v); } } catch {} render(); }
 });

@@ -41,7 +41,7 @@ function createServer() {
   tool('add_schedule', 'Add a recurring task, usually tied to an asset.', { task: z.string(), asset: z.string().optional(), every: z.number().optional(), unit: z.enum(['months', 'weeks', 'years', 'miles']).optional(), nextDue: z.string().optional(), lastDone: z.string().optional(), season: z.string().optional(), notes: z.string().optional(), area: z.string().optional() }, (hb, a) => hb.addSchedule(a));
   tool('place_on_map', 'Put an asset in a room on the house map.', { asset: z.string(), room: z.string() }, (hb, a) => hb.place(a.asset, a.room));
   tool('map', 'Floors, rooms, doors and placed assets of the house map.', {}, hb => hb.mapSummary());
-  tool('household', 'Who can open the logbook (Google accounts on the access list); add or remove an email.', { add: z.string().optional(), remove: z.string().optional() }, async (hb, a) => { if (a.add) await hb.share(a.add); if (a.remove) await hb.unshare(a.remove); return hb.shares(); });
+  tool('household', 'Who can open this logbook (Google accounts on the access list); add or remove an email. invite gives a Google account a separate, empty logbook of its own (for someone managing a different house), set up the first time they sign in to the site.', { add: z.string().optional(), remove: z.string().optional(), invite: z.string().optional() }, async (hb, a) => { if (a.add) await hb.share(a.add); if (a.invite) await hb.invite(a.invite); if (a.remove) await hb.unshare(a.remove); return hb.shares(); });
   return server;
 }
 

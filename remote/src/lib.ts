@@ -125,7 +125,28 @@ export class HomeBase {
   }
 
   // Household access list: access/{email} -> { owner } lets that Google account open the owner's data (the rules check it).
-  async share(email: string) { const e = String(email).trim().toLowerCase(); await this.db.set(`access/${e}`, { owner: this.owner, email: e, added: Date.now() }); return e; }
-  async unshare(email: string) { const e = String(email).trim().toLowerCase(); await this.db.delete(`access/${e}`); return e; }
-  async shares() { return this.db.list('access'); }
+  // An invite, access/{email} -> { invite: true, invitedBy }, gives that account a separate, empty logbook of its own:
+  // it claims the invite (owner = its own uid) the first time it signs in to the site. Same logic as ../tools/lib.mjs.
+  private async takenBy(e: string) {
+    const d = await this.db.get(`access/${e}`);
+    if (d && d.owner !== this.owner && d.invitedBy !== this.owner) throw new Error(`${e} is on another household's list; that household has to remove it.`);
+    return d;
+  }
+  async share(email: string) { const e = String(email).trim().toLowerCase(); await this.takenBy(e); await this.db.set(`access/${e}`, { owner: this.owner, email: e, added: Date.now() }); return e; }
+  /** Only the original household (the first owner on the list) may hand out new logbooks. */
+  async invite(email: string) {
+    const e = String(email).trim().toLowerCase();
+    const first = (await this.db.list('access')).filter(a => a.owner).sort((a, b) => Number(a.added || 0) - Number(b.added || 0))[0];
+    if (!first || first.owner !== this.owner) throw new Error('Only the original household can invite someone to a logbook of their own.');
+    if (await this.takenBy(e)) throw new Error(`${e} is already on this household's list; remove it first to give it a logbook of its own.`);
+    await this.db.set(`access/${e}`, { invite: true, invitedBy: this.owner, email: e, added: Date.now() });
+    return e;
+  }
+  async unshare(email: string) {
+    const e = String(email).trim().toLowerCase(); const d = await this.takenBy(e);
+    if (d && d.owner && d.owner !== this.owner) throw new Error(`${e} has claimed its own logbook; only that account's household can remove it.`);
+    await this.db.delete(`access/${e}`); return e;
+  }
+  /** This household's members and its pending invites (other households' entries are theirs). */
+  async shares() { return (await this.db.list('access')).filter(a => a.owner === this.owner || (!a.owner && a.invitedBy === this.owner)); }
 }
